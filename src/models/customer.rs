@@ -1,9 +1,13 @@
+use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::base_types::phone_number::PhoneNumber;
 
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::customers)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Customer {
-    id: u32,
+    id: i32,
     uuid: String,
     first_name: String,
     last_name: String,

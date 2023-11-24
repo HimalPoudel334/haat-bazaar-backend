@@ -1,14 +1,18 @@
+use diesel::prelude::*;
 use serde::Serialize;
 use uuid::Uuid;
 
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::categories)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Category {
-    id: u32,
+    id: i32,
     uuid: String,
     name: String,
 }
 
 impl Category {
-    pub fn get_id(&self) -> u32 {
+    pub fn get_id(&self) -> i32 {
         self.id
     }
     pub fn get_uuid(&self) -> &str {
@@ -19,6 +23,8 @@ impl Category {
     }
 }
 
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::categories)]
 #[derive(Serialize)]
 pub struct NewCategory {
     uuid: String,

@@ -1,9 +1,14 @@
+use diesel::prelude::*;
 use uuid::Uuid;
 
 use super::{order::Order, product::Product};
 
+#[derive(Queryable, Selectable, Associations)]
+#[diesel(table_name = crate::schema::order_details)]
+#[diesel(belongs_to(Order))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct OrderDetails {
-    id: u32,
+    id: i32,
     uuid: String,
     quantity: f64,
     product_id: i32,
@@ -14,8 +19,8 @@ pub struct OrderDetails {
 pub struct NewOrderDetail {
     uuid: String,
     quantity: f64,
-    product_id: u32,
-    order_id: u32,
+    product_id: i32,
+    order_id: i32,
 }
 
 impl NewOrderDetail {

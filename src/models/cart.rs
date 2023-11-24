@@ -1,8 +1,10 @@
+use chrono::NaiveDateTime;
+
 pub struct Cart {
-    id: u32,
+    id: i32,
     uuid: String,
-    product_id: u32,
-    customer_id: u32,
+    product_id: i32,
+    customer_id: i32,
     quantity: f64,
-    created_on: String,
+    created_on: NaiveDateTime,
 }

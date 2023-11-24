@@ -1,9 +1,14 @@
+use diesel::prelude::*;
 use uuid::Uuid;
 
 use super::category::Category;
 
+#[derive(Queryable, Selectable, Associations)]
+#[diesel(table_name = crate::schema::products)]
+#[diesel(belongs_to(Category))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Product {
-    id: u32,
+    id: i32,
     uuid: String,
     name: String,
     description: String,
@@ -13,9 +18,11 @@ pub struct Product {
     unit: String,
     unit_change: f64,
     stock: f64,
-    category_id: u32,
+    category_id: i32,
 }
 
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::products)]
 pub struct NewProduct {
     uuid: String,
     name: String,
@@ -26,11 +33,11 @@ pub struct NewProduct {
     unit: String,
     unit_change: f64,
     stock: f64,
-    category_id: u32,
+    category_id: i32,
 }
 
 impl Product {
-    pub fn get_id(&self) -> u32 {
+    pub fn get_id(&self) -> i32 {
         self.id
     }
     pub fn get_uuid(&self) -> &str {
