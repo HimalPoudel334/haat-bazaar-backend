@@ -21,14 +21,13 @@ async fn main() -> std::io::Result<()> {
     let app_config = config::ApplicationConfiguration::init();
 
     //setting up the sqlite database
-    let sqlitedb_pool: connection::SqliteConnectionPool =
-        connection::establish_connection(&app_config);
+    let db_pool: connection::SqliteConnectionPool = connection::establish_connection(&app_config);
 
     println!("Server started on http://localhost:8080");
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(app_config.clone()))
-            .app_data(Data::new(sqlitedb_pool.clone()))
+            .app_data(Data::new(db_pool.clone()))
             .configure(routes::app_routes)
     })
     .bind(("127.0.0.1", 8080))?

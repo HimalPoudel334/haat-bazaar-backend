@@ -18,3 +18,14 @@ pub fn establish_connection(app_config: &ApplicationConfiguration) -> SqliteConn
         }
     }
 }
+
+pub fn get_conn(pool: &SqliteConnectionPool) -> PooledSqliteConnection {
+    pool.get().unwrap()
+}
+
+pub fn get_db_connection_from_pool(
+    pool: &SqliteConnectionPool,
+) -> Result<PooledSqliteConnection, PoolError> {
+    let result = pool.get().unwrap();
+    Ok(result)
+}
