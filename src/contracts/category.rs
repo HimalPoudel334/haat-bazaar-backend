@@ -8,6 +8,7 @@ pub struct CategoryCreate {
 
 #[derive(Debug, Serialize, Deserialize, Queryable)]
 pub struct Category {
+    #[serde(rename = "id")]
     pub uuid: String,
     pub name: String,
 }

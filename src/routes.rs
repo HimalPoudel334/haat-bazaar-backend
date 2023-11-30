@@ -6,7 +6,11 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/customers")
             .service(customer::create)
-            .service(customer::get_customer),
+            .service(customer::get)
+            .service(customer::get_customer)
+            .service(customer::get_customer_from_phone_number)
+            .service(customer::edit)
+            .service(customer::delete),
     )
     .service(web::scope("/products").service(product::create))
     .service(

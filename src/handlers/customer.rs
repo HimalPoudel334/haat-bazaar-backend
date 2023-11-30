@@ -31,6 +31,15 @@ pub async fn create(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::customers::dsl::*;
+    let phone_num: PhoneNumber = match PhoneNumber::from_str(customer.phone_number.to_owned()) {
+        Ok(phone) => phone,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": e}))
+        }
+    };
+
     match customers
         .filter(phone_number.eq(&customer.phone_number))
         .select(CustomerModel::as_select())
@@ -41,16 +50,6 @@ pub async fn create(
             .status(StatusCode::CONFLICT)
             .json(serde_json::json!({"message": "Phone number already used"})),
         Ok(None) => {
-            let phone_num: PhoneNumber =
-                match PhoneNumber::from_str(customer.phone_number.to_owned()) {
-                    Ok(phone) => phone,
-                    Err(e) => {
-                        return HttpResponse::BadRequest()
-                            .status(StatusCode::BAD_REQUEST)
-                            .json(serde_json::json!({"message": e}))
-                    }
-                };
-
             let new_customer = NewCustomer::new(
                 customer.first_name.to_owned(),
                 customer.last_name.to_owned(),
@@ -104,6 +103,42 @@ pub async fn get_customer(
 
     match customers
         .filter(uuid.eq(uid.to_string()))
+        .select(Customer::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(cust) => match cust {
+            Some(c) => HttpResponse::Ok().status(StatusCode::OK).json(c),
+            None => HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Customer not found"})),
+        },
+        Err(e) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
+    }
+}
+
+#[get("/phone-number/{phone_num}")]
+pub async fn get_customer_from_phone_number(
+    phone_num: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let phone_num_string: String = phone_num.into_inner().0;
+    //check if the user_id is valid uuid or not before trip to db
+    let ph_num: PhoneNumber = match PhoneNumber::from_str(phone_num_string) {
+        Ok(p) => p,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": e}))
+        }
+    };
+
+    use crate::schema::customers::dsl::*;
+
+    match customers
+        .filter(phone_number.eq(&ph_num.get_number()))
         .select(Customer::as_select())
         .first(&mut get_conn(&pool))
         .optional()
