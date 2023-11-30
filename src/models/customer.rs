@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::base_types::phone_number::PhoneNumber;
 
-#[derive(Queryable, Selectable, Identifiable)]
+#[derive(PartialEq, Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::customers)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Customer {

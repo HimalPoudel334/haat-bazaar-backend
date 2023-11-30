@@ -6,7 +6,7 @@ use crate::{
     base_types::phone_number::PhoneNumber,
     contracts::customer::{Customer, CustomerCreate},
     db::connection::{get_conn, SqliteConnectionPool},
-    models::customer::NewCustomer,
+    models::customer::{Customer as CustomerModel, NewCustomer},
     utils::password_helper::hash_password,
 };
 
@@ -33,7 +33,7 @@ pub async fn create(
     use crate::schema::customers::dsl::*;
     match customers
         .filter(phone_number.eq(&customer.phone_number))
-        .select(crate::models::customer::Customer::as_select())
+        .select(CustomerModel::as_select())
         .first(&mut get_conn(&pool))
         .optional()
     {
@@ -60,7 +60,7 @@ pub async fn create(
 
             match diesel::insert_into(customers)
                 .values(&new_customer)
-                .get_result::<crate::models::customer::Customer>(&mut get_conn(&pool))
+                .get_result::<CustomerModel>(&mut get_conn(&pool))
             {
                 Ok(c) => {
                     let customer_created: Customer = Customer {
@@ -123,7 +123,7 @@ pub async fn get_customer(
 #[put("/{user_id}")]
 pub async fn edit(
     user_id: web::Path<(String,)>,
-    customer: web::Json<Customer>,
+    customer_update: web::Json<Customer>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     let uid: String = user_id.into_inner().0;
@@ -138,7 +138,7 @@ pub async fn edit(
     };
 
     //check if the phone number is valid or not
-    let _ = match PhoneNumber::from_str(customer.phone_number.to_owned()) {
+    let _ = match PhoneNumber::from_str(customer_update.phone_number.to_owned()) {
         Ok(_) => (),
         Err(e) => {
             return HttpResponse::BadRequest()
@@ -150,43 +150,67 @@ pub async fn edit(
     use crate::schema::customers::dsl::*;
 
     //check if the new phone number is already used or not
-
-    match customers
+    let customer_from_phone: CustomerModel = match customers
         .filter(uuid.eq(uid.to_string()))
-        .filter(phone_number.eq(&customer.phone_number))
         .select(crate::models::customer::Customer::as_select())
         .first(&mut get_conn(&pool))
         .optional()
     {
-        Ok(cust) => match cust {
-            Some(_) => HttpResponse::Conflict().status(StatusCode::CONFLICT).json(serde_json::json!({"message": "Phone number already used"})),
-            None => match customers
-                .filter(uuid.eq(uid.to_string()))
-                .select(crate::models::customer::Customer::as_select())
-                .first(&mut get_conn(&pool))
-                .optional() {                
-                    Ok(cust) => match cust {
-                        Some(c) => match diesel::update(&c).set((
-                                first_name.eq(&customer.first_name),
-                                last_name.eq(&customer.last_name),
-                                phone_number.eq(&customer.phone_number)
-                            ))
-                            .execute(&mut get_conn(&pool)) {
-                                Ok(_) => HttpResponse::Ok().status(StatusCode::OK).json(customer),
-                                Err(e) => HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
-                            },
-                        None => HttpResponse::NotFound()
-                            .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Customer not found"})),
-
-
-                    },
-                    Err(e) => HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
-                }
-                    
+        Ok(cu) => match cu {
+            Some(c) => c,
+            None => {
+                return HttpResponse::NotFound()
+                    .status(StatusCode::NOT_FOUND)
+                    .json(serde_json::json!({"message": "Customer not found"}))
+            }
+        },
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
         }
+    };
+
+    let customer: CustomerModel = match customers
+        .filter(uuid.eq(uid.to_string()))
+        .select(crate::models::customer::Customer::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(cu) => match cu {
+            Some(c) => {
+                if c == customer_from_phone {
+                    c
+                } else {
+                    return HttpResponse::Conflict()
+                        .status(StatusCode::CONFLICT)
+                        .json(serde_json::json!({"message": "Phone number already used"}));
+                }
+            }
+            None => {
+                return HttpResponse::NotFound()
+                    .status(StatusCode::NOT_FOUND)
+                    .json(serde_json::json!({"message": "Customer not found"}))
+            }
+        },
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
+        }
+    };
+
+    match diesel::update(&customer)
+        .set((
+            first_name.eq(&customer_update.first_name),
+            last_name.eq(&customer_update.last_name),
+            phone_number.eq(&customer_update.phone_number),
+        ))
+        .execute(&mut get_conn(&pool))
+    {
+        Ok(_) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(customer_update),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
@@ -196,5 +220,7 @@ pub async fn edit(
 #[delete("/{user_id}")]
 pub async fn delete(user_id: web::Path<(String,)>) -> impl Responder {
     let _id: String = user_id.into_inner().0;
-    HttpResponse::BadRequest().status(StatusCode::BAD_REQUEST).json(serde_json::json!({"message": "Cannot delete a resource"}))
+    HttpResponse::BadRequest()
+        .status(StatusCode::BAD_REQUEST)
+        .json(serde_json::json!({"message": "Cannot delete a resource"}))
 }
