@@ -1,8 +1,7 @@
+use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
-use super::category::Category;
-
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Queryable)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
     #[serde(rename = "id")]
@@ -15,5 +14,19 @@ pub struct Product {
     pub unit: String,
     pub unit_change: f64,
     pub stock: f64,
-    pub category: Category,
+    pub category_id: String,
+    pub category_name: String,
+}
+
+#[derive(Deserialize)]
+pub struct ProductCreate {
+    pub name: String,
+    pub description: String,
+    pub image: String,
+    pub price: f64,
+    pub previous_price: f64,
+    pub unit: String,
+    pub unit_change: f64,
+    pub stock: f64,
+    pub category_id: String,
 }

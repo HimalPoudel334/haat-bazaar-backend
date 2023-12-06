@@ -1,8 +1,8 @@
 use diesel::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Queryable, Selectable)]
+#[derive(Identifiable, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::categories)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Category {
