@@ -88,25 +88,9 @@ pub async fn create(
         .values(&product)
         .get_result::<ProductModel>(&mut get_conn(&pool))
     {
-        Ok(p) => {
-            let product_response: Product = Product {
-                uuid: p.get_uuid().to_owned(),
-                name: product_json.name.to_owned(),
-                description: product_json.description.to_owned(),
-                image: product_json.image.to_owned(),
-                price: product_json.price,
-                previous_price: product_json.previous_price,
-                unit: product_json.unit.to_owned(),
-                unit_change: product_json.unit_change,
-                stock: product_json.stock,
-                category_id: category.get_uuid().to_owned(),
-                category_name: category.get_name().to_owned(),
-            };
-
-            HttpResponse::Ok()
-                .status(StatusCode::OK)
-                .json(product_response)
-        }
+        Ok(p) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(p.as_response(&category)),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! Something went wrong"})),
@@ -114,12 +98,49 @@ pub async fn create(
 }
 
 #[get("/{product_id}")]
-pub async fn get_product(product_id: String) -> impl Responder {
-    HttpResponse::Ok().finish()
+pub async fn get_product(
+    product_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_uuid: String = product_id.into_inner().0;
+
+    // I wonder if I should first validate the product_id
+    use crate::schema::categories::dsl::*;
+    use crate::schema::products;
+    use crate::schema::products::dsl::*;
+
+    match products
+        .filter(products::uuid.eq(&prod_uuid))
+        .select(ProductModel::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(prod) => match prod {
+            Some(p) => {
+                let category: CategoryModel = categories
+                    .find(p.get_category_id())
+                    .first(&mut get_conn(&pool))
+                    .unwrap();
+                HttpResponse::Ok()
+                    .status(StatusCode::OK)
+                    .json(p.as_response(&category))
+            }
+            None => HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found. lol"})),
+        },
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
 }
 
 #[put("/{product_id}")]
-pub async fn edit(product_id: String) -> impl Responder {
+pub async fn edit(
+    product_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+    product_json: web::Json<Product>,
+) -> impl Responder {
     HttpResponse::Ok().finish()
 }
 

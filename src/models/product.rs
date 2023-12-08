@@ -28,6 +28,28 @@ impl Product {
     pub fn get_uuid(&self) -> &str {
         &self.uuid
     }
+
+    pub fn get_category_id(&self) -> i32 {
+        self.category_id
+    }
+
+    //oh lord have mercy
+    //I have created a dependency of this model to contracts which should be avoided
+    pub fn as_response(&self, category: &Category) -> crate::contracts::product::Product {
+        crate::contracts::product::Product {
+            uuid: self.uuid.to_owned(),
+            name: self.name.to_owned(),
+            description: self.description.to_owned(),
+            image: self.image.to_owned(),
+            price: self.price,
+            previous_price: self.previous_price,
+            unit: self.unit.to_owned(),
+            unit_change: self.unit_change,
+            stock: self.stock,
+            category_id: category.get_uuid().to_string(),
+            category_name: category.get_name().to_string(),
+        }
+    }
 }
 
 #[derive(Insertable)]

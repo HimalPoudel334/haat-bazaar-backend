@@ -12,7 +12,12 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(customer::edit)
             .service(customer::delete),
     )
-    .service(web::scope("/products").service(product::create))
+    .service(
+        web::scope("/products")
+            .service(product::get)
+            .service(product::create)
+            .service(product::get_product),
+    )
     .service(
         web::scope("/categories")
             .service(category::create)

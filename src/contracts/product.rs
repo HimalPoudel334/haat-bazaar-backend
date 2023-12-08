@@ -1,4 +1,4 @@
-use diesel::deserialize::Queryable;
+use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Queryable)]
