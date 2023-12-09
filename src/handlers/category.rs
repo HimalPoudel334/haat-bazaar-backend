@@ -21,7 +21,7 @@ pub async fn create(
         .optional()
     {
         Ok(cat) => match cat {
-            Some(c) => return HttpResponse::Conflict().json(
+            Some(c) => HttpResponse::Conflict().json(
                 serde_json::json!({"status": "fail","message": format!("Category with name {} aready exists", c)}),
             ),
             None => {
@@ -29,15 +29,15 @@ pub async fn create(
                 match diesel::insert_into(categories)
                     .values(&category)
                     .execute(&mut get_conn(&db_conn_pool)) {
-                        Ok(_) => return HttpResponse::Ok().json(category),
+                        Ok(_) => HttpResponse::Ok().json(category),
                         Err(_) => HttpResponse::InternalServerError().finish()
                     }
             }
         },
-        Err(e) => {
-            return HttpResponse::InternalServerError()
+        Err(e) => 
+             HttpResponse::InternalServerError()
                 .body(format!("Ops! something went wrong: {}", e))
-        }
+        
     }
 }
 
@@ -50,9 +50,8 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
 
     match categories_vec {
         Ok(cat_v) => HttpResponse::Ok().json(cat_v),
-        Err(e) => {
-            HttpResponse::InternalServerError().json(serde_json::json!({"message": e.to_string()}))
-        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"message": e.to_string()}))
+        
     }
 }
 
@@ -75,11 +74,10 @@ pub async fn get_category(
                 .status(StatusCode::NOT_FOUND)
                 .json(serde_json::json!({"message":"Category not found"})),
         },
-        Err(e) => {
-            return HttpResponse::InternalServerError()
+        Err(e) => HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .body(format!("Ops! something went wrong: {}", e))
-        }
+        
     }
 }
 
@@ -103,21 +101,21 @@ pub async fn edit(
                 uuid: uid,
                 name: category_update.name.to_owned(),
             };
-            return HttpResponse::Ok()
+            HttpResponse::Ok()
                 .status(StatusCode::OK)
-                .json(serde_json::json!(category));
+                .json(serde_json::json!(category))
         }
-        Ok(_) => {
+        Ok(_) => 
             //match branch if the value is <= 0
-            return HttpResponse::NotFound()
+            HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .finish();
-        }
-        Err(e) => {
-            return HttpResponse::InternalServerError()
+                .finish(),
+        
+        Err(e) => 
+             HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .json(serde_json::json!({"message": format!("Ops! something went wrong: {}", e)}))
-        }
+        
     }
 }
 
@@ -133,14 +131,14 @@ pub async fn delete(
     {
         //drc = deleted_row_count
         //execute() function returns the number of row affected
-        Ok(drc) if drc > 0 => return HttpResponse::Ok().status(StatusCode::OK).finish(),
+        Ok(drc) if drc > 0 => HttpResponse::Ok().status(StatusCode::OK).finish(),
 
         //if the drc <= 0 then no row is affected meaning deletetion not successfull. 
         //Why? because the resource is not found with that uuid
-        Ok(_) => return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).finish(),
+        Ok(_) => HttpResponse::NotFound().status(StatusCode::NOT_FOUND).finish(),
         
         Err(e) => 
-            return HttpResponse::InternalServerError()
+            HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .json(serde_json::json!({"message": format!("Ops! something went wrong: {}", e)}))
         

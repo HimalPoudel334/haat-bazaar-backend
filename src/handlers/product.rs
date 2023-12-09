@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-#[get("/")]
+#[get("")]
 pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     use crate::schema::categories;
     use crate::schema::categories::dsl::*;
@@ -42,7 +42,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     }
 }
 
-#[post("/")]
+#[post("")]
 pub async fn create(
     product_json: web::Json<ProductCreate>,
     pool: web::Data<SqliteConnectionPool>,
@@ -62,12 +62,13 @@ pub async fn create(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Category could not be found"}))
+                .json(serde_json::json!({"message": "Category could not be found"}));
         }
+
         Err(_) => {
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
         }
     };
 
@@ -141,10 +142,81 @@ pub async fn edit(
     pool: web::Data<SqliteConnectionPool>,
     product_json: web::Json<Product>,
 ) -> impl Responder {
-    HttpResponse::Ok().finish()
+    let prod_uuid: String = product_id.into_inner().0;
+
+    use crate::schema::categories;
+    use crate::schema::categories::dsl::*;
+    use crate::schema::products;
+    use crate::schema::products::dsl::*;
+
+    let product: ProductModel = match products
+        .filter(products::uuid.eq(&prod_uuid))
+        .select(ProductModel::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(prod) => match prod {
+            Some(p) => p,
+            None => {
+                return HttpResponse::NotFound()
+                    .status(StatusCode::NOT_FOUND)
+                    .json(serde_json::json!({"message": "Product not found"}))
+            }
+        },
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong!"}))
+        }
+    };
+
+    //validate if the category exists or not
+    let category: CategoryModel = match categories
+        .filter(categories::uuid.eq(&product_json.category_id))
+        .select(CategoryModel::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(cat) => match cat {
+            Some(c) => c,
+            None => {
+                return HttpResponse::BadRequest()
+                    .status(StatusCode::BAD_REQUEST)
+                    .json(serde_json::json!({"message": "Category not found"}))
+            }
+        },
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong!"}))
+        }
+    };
+
+    //zero validation are done for now
+    match diesel::update(&product)
+        .set((
+            products::name.eq(&product_json.name),
+            description.eq(&product_json.description),
+            image.eq(&product_json.image),
+            price.eq(&product_json.price),
+            previous_price.eq(product_json.previous_price),
+            unit.eq(&product_json.unit),
+            unit_change.eq(product_json.unit_change),
+            stock.eq(product_json.stock),
+            category_id.eq(category.get_id()),
+        ))
+        .get_result::<ProductModel>(&mut get_conn(&pool))
+    {
+        Ok(updated_product) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(updated_product.as_response(&category)),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message":"Ops! something went wrong!"})),
+    }
 }
 
 #[delete("/{product_id}")]
-pub async fn delete(product_id: String) -> impl Responder {
+pub async fn delete(_product_id: web::Path<(String,)>) -> impl Responder {
     HttpResponse::Ok().finish()
 }

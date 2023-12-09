@@ -36,7 +36,7 @@ pub async fn create(
         Err(e) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}))
+                .json(serde_json::json!({"message": e}));
         }
     };
 
@@ -95,7 +95,7 @@ pub async fn get_customer(
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user id"}))
+                .json(serde_json::json!({"message": "Invalid user id"}));
         }
     };
 
@@ -131,7 +131,7 @@ pub async fn get_customer_from_phone_number(
         Err(e) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}))
+                .json(serde_json::json!({"message": e}));
         }
     };
 
@@ -168,7 +168,7 @@ pub async fn edit(
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user id"}))
+                .json(serde_json::json!({"message": "Invalid user id"}));
         }
     };
 
@@ -178,37 +178,33 @@ pub async fn edit(
         Err(e) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}))
+                .json(serde_json::json!({"message": e}));
         }
     };
 
     use crate::schema::customers::dsl::*;
 
     //check if the new phone number is already used or not
-    let customer_from_phone: CustomerModel = match customers
-        .filter(uuid.eq(uid.to_string()))
-        .select(crate::models::customer::Customer::as_select())
+    let customer_from_phone = match customers
+        .filter(phone_number.eq(customer_update.phone_number.to_string()))
+        .select(CustomerModel::as_select())
         .first(&mut get_conn(&pool))
         .optional()
     {
         Ok(cu) => match cu {
             Some(c) => c,
-            None => {
-                return HttpResponse::NotFound()
-                    .status(StatusCode::NOT_FOUND)
-                    .json(serde_json::json!({"message": "Customer not found"}))
-            }
+            None => Default::default(), //return the default Customer struct if not found
         },
         Err(e) => {
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
+                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}));
         }
     };
 
     let customer: CustomerModel = match customers
         .filter(uuid.eq(uid.to_string()))
-        .select(crate::models::customer::Customer::as_select())
+        .select(CustomerModel::as_select())
         .first(&mut get_conn(&pool))
         .optional()
     {
@@ -225,13 +221,13 @@ pub async fn edit(
             None => {
                 return HttpResponse::NotFound()
                     .status(StatusCode::NOT_FOUND)
-                    .json(serde_json::json!({"message": "Customer not found"}))
+                    .json(serde_json::json!({"message": "Customer not found"}));
             }
         },
         Err(e) => {
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
+                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}));
         }
     };
 
