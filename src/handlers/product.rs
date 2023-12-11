@@ -1,8 +1,12 @@
-use actix_web::{delete, get, http::StatusCode, post, put, web, HttpResponse, Responder};
+use ::uuid::Uuid;
+use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
 use crate::{
-    contracts::product::{Product, ProductCreate},
+    contracts::{
+        category::Category,
+        product::{Product, ProductCreate, ProductStockUpdate},
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         category::Category as CategoryModel,
@@ -213,6 +217,107 @@ pub async fn edit(
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message":"Ops! something went wrong!"})),
+    }
+}
+
+#[patch("/{product_id}/category/update")]
+pub async fn update_product_category(
+    product_id: web::Path<(String,)>,
+    category_update: web::Json<Category>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_uuid: String = product_id.into_inner().0;
+
+    use crate::schema::categories::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{categories, products};
+
+    //check if the product_id is valid uuid or not before trip to db
+    let prod_uuid: Uuid = match Uuid::parse_str(prod_uuid.as_str()) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+
+    let _cat_uuid: Uuid = match Uuid::parse_str(&category_update.uuid.as_str()) {
+        Ok(cu) => cu,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid category id"}));
+        }
+    };
+
+    //first I have to get the category for the category uuid
+    let category: CategoryModel = match categories
+        .filter(categories::uuid.eq(&category_update.uuid))
+        .select(CategoryModel::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Category not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong."}));
+        }
+    };
+
+    match diesel::update(products)
+        .filter(products::uuid.eq(&prod_uuid.to_string()))
+        .set(category_id.eq(&category.get_id()))
+        .execute(&mut get_conn(&pool))
+    {
+        Ok(urc) if urc > 0 => HttpResponse::Ok().status(StatusCode::OK).finish(),
+        Ok(_) => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .finish(),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong."})),
+    }
+}
+
+#[patch("{product_id}/stock/update")]
+pub async fn update_product_stock(
+    product_id: web::Path<(String,)>,
+    new_stock: web::Query<ProductStockUpdate>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_uuid: String = product_id.into_inner().0;
+
+    //check if the product_id is valid uuid or not before trip to db
+    let prod_uuid: Uuid = match Uuid::parse_str(prod_uuid.as_str()) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+
+    use crate::schema::products::dsl::*;
+    //update the product's stock
+    match diesel::update(products)
+        .filter(uuid.eq(&prod_uuid.to_string()))
+        .set(stock.eq(new_stock.stock))
+        .execute(&mut get_conn(&pool))
+    {
+        Ok(urc) if urc > 0 => HttpResponse::Ok().status(StatusCode::OK).finish(),
+        Ok(_) => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Product not found"})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong."})),
     }
 }
 

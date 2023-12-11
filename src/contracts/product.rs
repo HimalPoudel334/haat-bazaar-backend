@@ -1,4 +1,4 @@
-use diesel::{deserialize::Queryable, Selectable};
+use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Queryable)]
@@ -29,4 +29,9 @@ pub struct ProductCreate {
     pub unit_change: f64,
     pub stock: f64,
     pub category_id: String,
+}
+
+#[derive(Deserialize)]
+pub struct ProductStockUpdate {
+    pub stock: f64,
 }
