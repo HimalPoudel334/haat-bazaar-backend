@@ -18,7 +18,9 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
         .load::<Customer>(&mut get_conn(&pool));
 
     match customers_vec {
-        Ok(cat_v) => HttpResponse::Ok().status(StatusCode::OK).json(cat_v),
+        Ok(cust_v) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"message": cust_v})),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": e.to_string()})),
