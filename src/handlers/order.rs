@@ -41,6 +41,51 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .json(serde_json::json!({"data": orders_vec}))
 }
 
+#[get("/{order_id}")]
+pub async fn get_order(
+    order_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let order_id: String = order_id.into_inner().0;
+
+    //check if the order id is a valid uuid
+    let order_id: Uuid = match Uuid::parse_str(&order_id) {
+        Ok(o) => o,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid order id"}))
+        }
+    };
+
+    use crate::schema::customers::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::{customers, orders};
+
+    match orders
+        .inner_join(customers)
+        .filter(orders::uuid.eq(&order_id.to_string()))
+        .select((
+            orders::uuid,
+            created_on,
+            fulfilled_on,
+            delivery_location,
+            delivery_status,
+            total_price,
+            customers::uuid,
+        ))
+        .first::<Order>(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(Some(o)) => HttpResponse::Ok().status(StatusCode::OK).json(o),
+        Ok(None) => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Order not found"})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
 #[post("")]
 pub async fn create(
     order_json: web::Json<OrderCreate>,

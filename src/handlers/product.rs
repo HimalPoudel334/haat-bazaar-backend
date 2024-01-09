@@ -1,11 +1,14 @@
 use ::uuid::Uuid;
+use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
+use crate::models::product::NewProductImage;
 use crate::{
+    config::ApplicationConfiguration,
     contracts::{
         category::Category,
-        product::{Product, ProductCreate, ProductStockUpdate},
+        product::{Product, ProductCreate, ProductStockUpdate, UploadForm},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -326,4 +329,107 @@ pub async fn update_product_stock(
 #[delete("/{product_id}")]
 pub async fn delete(_product_id: web::Path<(String,)>) -> impl Responder {
     HttpResponse::Ok().finish()
+}
+
+#[post("/{prod_id}/images")]
+pub async fn upload_product_images(
+    prod_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+    app_config: web::Data<ApplicationConfiguration>,
+    MultipartForm(form): MultipartForm<UploadForm>,
+) -> impl Responder {
+    let prod_uuid: String = prod_id.into_inner().0;
+
+    //check if the product_id is valid uuid or not before trip to db
+    let prod_uuid: Uuid = match Uuid::parse_str(prod_uuid.as_str()) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+
+    use crate::schema::products;
+    use crate::schema::products::dsl::*;
+    //get the product for the uuid
+    let product: ProductModel = match products
+        .filter(products::uuid.eq(&prod_uuid.to_string()))
+        .select(ProductModel::as_select())
+        .first(&mut get_conn(&pool))
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    //handle the thumbnail image
+    if let Some(thumbnail_image) = form.image {
+        let path = format!(
+            "{}product_{}_thumbnail.png",
+            app_config.product_thumbnail_path,
+            product.get_uuid(),
+        );
+        println!("{}", path);
+        println!("Thumbnail image path is: {:?}", thumbnail_image.file.path());
+        //might throw runtime exeception
+        std::fs::copy(thumbnail_image.file.path(), &path).unwrap();
+        std::fs::remove_file(thumbnail_image.file.path()).unwrap();
+        //thumbnail_image.file.persist(path).unwrap();
+
+        //save the file path in db
+        match diesel
+        ::update(&product)
+            .set(image.eq(&path))
+            .execute(&mut get_conn(&pool))
+        {
+            Ok(urc) => {
+                if urc <= 0 {
+                    return HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": "ops! something went wrong while updating product thumbnail"}));
+                }
+            },
+            Err(_) => return HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": "ops! something went wrong while updating product thumbnail"}))
+        };
+    }
+    //handle multiple images
+    use crate::schema::product_images::dsl::*;
+
+    println!("Multiple images code");
+    println!("Server got {} images", form.images.len());
+    for img in form.images {
+        let path = format!(
+            "{}product_{}_extra.png",
+            app_config.product_extraimages_path,
+            Uuid::new_v4().to_string()
+        );
+
+        //might throw runtime exeception
+        std::fs::copy(img.file.path(), &path).unwrap();
+        //f.file.persist(path).unwrap();
+
+        //insert the image name into the db with product id
+        let product_image: NewProductImage = NewProductImage::new(&product, path.to_owned());
+        match diesel::insert_into(product_images)
+            .values(&product_image)
+            .execute(&mut get_conn(&pool))
+        {
+            Ok(_) => {}
+            Err(_) => return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(
+                    serde_json::json!({"message": "Ops! something went wrong while saving image"}),
+                ),
+        };
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"message": "Upload successful"}))
 }

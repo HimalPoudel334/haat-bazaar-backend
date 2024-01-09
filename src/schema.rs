@@ -65,6 +65,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    product_images (id) {
+        id -> Integer,
+        uuid -> Text,
+        image_name -> Text,
+        product_id -> Integer,
+    }
+}
+
+diesel::table! {
     products (id) {
         id -> Integer,
         uuid -> Text,
@@ -101,6 +110,7 @@ diesel::joinable!(order_details -> products (product_id));
 diesel::joinable!(orders -> customers (customer_id));
 diesel::joinable!(payments -> customers (customer_id));
 diesel::joinable!(payments -> orders (order_id));
+diesel::joinable!(product_images -> products (product_id));
 diesel::joinable!(products -> categories (category_id));
 diesel::joinable!(shipments -> orders (order_id));
 
@@ -111,6 +121,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     order_details,
     orders,
     payments,
+    product_images,
     products,
     shipments,
 );

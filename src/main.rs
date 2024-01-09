@@ -24,6 +24,10 @@ async fn main() -> std::io::Result<()> {
     //setting up the sqlite database
     let db_pool: connection::SqliteConnectionPool = connection::establish_connection(&app_config);
 
+    //create a directory for uploading images
+    std::fs::create_dir_all(&app_config.product_extraimages_path)?;
+    std::fs::create_dir_all(&app_config.product_thumbnail_path)?;
+
     println!("Server started on http://localhost:8080");
     HttpServer::new(move || {
         App::new()
@@ -31,7 +35,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(Data::new(db_pool.clone()))
             .configure(routes::app_routes)
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("0.0.0.0", 8080))?
     .run()
     .await
 }
