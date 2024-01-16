@@ -3,7 +3,7 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
-use crate::models::product::NewProductImage;
+use crate::models::product_images::NewProductImage;
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
@@ -44,7 +44,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     match product_vec {
         Ok(p) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(serde_json::json!({"data": p})),
+            .json(serde_json::json!({"products": p})),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": e.to_string()})),
@@ -417,7 +417,7 @@ pub async fn upload_product_images(
         //f.file.persist(path).unwrap();
 
         //insert the image name into the db with product id
-        let product_image: NewProductImage = NewProductImage::new(&product, path.to_owned());
+        let product_image: NewProductImage = NewProductImage::new(&path, &product);
         match diesel::insert_into(product_images)
             .values(&product_image)
             .execute(&mut get_conn(&pool))

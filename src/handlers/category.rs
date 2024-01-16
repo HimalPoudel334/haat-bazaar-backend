@@ -49,7 +49,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
         .load::<Category>(&mut get_conn(&pool));
 
     match categories_vec {
-        Ok(cat_v) => HttpResponse::Ok().json(serde_json::json!({"data": cat_v})),
+        Ok(cat_v) => HttpResponse::Ok().json(serde_json::json!({"categories": cat_v})),
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"message": e.to_string()}))
         
     }

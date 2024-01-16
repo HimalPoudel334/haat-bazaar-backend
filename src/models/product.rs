@@ -37,6 +37,10 @@ impl Product {
         &self.name
     }
 
+    pub fn get_price(&self) -> f64 {
+        self.price
+    }
+
     //oh lord have mercy
     //I have created a dependency of this model to contracts which should be avoided
     pub fn as_response(&self, category: &Category) -> crate::contracts::product::Product {
@@ -94,35 +98,6 @@ impl NewProduct {
             unit_change,
             stock,
             category_id: category.get_id(),
-        }
-    }
-}
-
-#[derive(Queryable, Selectable, Associations, Identifiable)]
-#[diesel(table_name = crate::schema::product_images)]
-#[diesel(belongs_to(Product))]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ProductImage {
-    id: i32,
-    uuid: String,
-    image_name: String,
-    product_id: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = crate::schema::product_images)]
-pub struct NewProductImage {
-    uuid: String,
-    image_name: String,
-    product_id: i32,
-}
-
-impl NewProductImage {
-    pub fn new(product: &Product, image_name: String) -> Self {
-        Self {
-            uuid: Uuid::new_v4().to_string(),
-            image_name,
-            product_id: product.get_id(),
         }
     }
 }

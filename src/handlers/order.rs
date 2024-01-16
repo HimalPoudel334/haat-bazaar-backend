@@ -6,7 +6,10 @@ use crate::{
     base_types::delivery_status::DeliveryStatus,
     contracts::order::{Order, OrderCreate, OrderDeliveryStatus, OrderEdit},
     db::connection::{get_conn, SqliteConnectionPool},
-    models::{customer::Customer as CustomerModel, order::NewOrder, order::Order as OrderModel},
+    models::{
+        customer::Customer as CustomerModel, order::NewOrder, order::Order as OrderModel,
+        order_details::NewOrderDetail as NewOrderDetailModel, product::Product as ProductModel,
+    },
 };
 
 #[get("")]
@@ -102,8 +105,11 @@ pub async fn create(
         }
     };
 
-    use crate::schema::customers;
     use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{customers, orders, products};
 
     let customer: CustomerModel = match customers
         .filter(customers::uuid.eq(customer_uuid.to_string()))
@@ -132,12 +138,41 @@ pub async fn create(
         order_json.delivery_location.to_owned(),
     );
 
-    use crate::schema::orders::dsl::*;
     match diesel::insert_into(orders)
         .values(&order)
         .get_result::<OrderModel>(&mut get_conn(&pool))
     {
         Ok(o) => {
+            //if any one of this failed, then god will help
+            for order_detail in &order_json.order_details {
+                let pr: ProductModel = match products
+                    .filter(products::uuid.eq(&order_detail.product_id))
+                    .select(ProductModel::as_select())
+                    .first(&mut get_conn(&pool))
+                    .optional()
+                {
+                    Ok(Some(p)) => p,
+                    Ok(None) => {
+                        return HttpResponse::NotFound()
+                            .status(StatusCode::NOT_FOUND)
+                            .json(serde_json::json!({"message": "Product not found"}))
+                    }
+                    Err(_) => {
+                        return HttpResponse::InternalServerError()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
+                    }
+                };
+
+                let od: NewOrderDetailModel =
+                    NewOrderDetailModel::new(order_detail.quantity, order_detail.price, &pr, &o);
+
+                diesel::insert_into(order_details)
+                    .values(&od)
+                    .execute(&mut get_conn(&pool))
+                    .unwrap();
+            }
+
             let order: Order = Order {
                 customer_id: customer_uuid.to_string(),
                 created_on: o.get_created_on().to_owned(),

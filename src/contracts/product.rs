@@ -20,11 +20,11 @@ pub struct Product {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProductCreate {
     pub name: String,
     pub description: String,
     pub image: String,
-    pub images: Option<Vec<String>>,
     pub price: f64,
     pub previous_price: f64,
     pub unit: String,
