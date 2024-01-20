@@ -1,12 +1,14 @@
+use diesel::{Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Queryable)]
 pub struct OrderDetails {
     pub uuid: String,
-    pub quantity: f64,
     pub product_id: String,
     pub order_id: String,
+    pub quantity: f64,
     pub price: f64,
 }
 

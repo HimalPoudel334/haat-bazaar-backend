@@ -109,7 +109,7 @@ pub async fn create(
     use crate::schema::order_details::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{customers, orders, products};
+    use crate::schema::{customers, products};
 
     let customer: CustomerModel = match customers
         .filter(customers::uuid.eq(customer_uuid.to_string()))
