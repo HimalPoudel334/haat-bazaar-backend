@@ -1,6 +1,6 @@
 use actix_web::web;
 
-use crate::handlers::{category, customer, order, product};
+use crate::handlers::{category, customer, order, order_details, product};
 
 pub fn app_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
@@ -35,5 +35,11 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(order::edit)
             .service(order::get_orders)
             .service(order::update_delivery_status),
+    )
+    .service(
+        web::scope("/order-details")
+            .service(order_details::get)
+            .service(order_details::get_order_detail)
+            .service(order_details::add_order_detail),
     );
 }

@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS carts (
   uuid TEXT NOT NULL UNIQUE,
   product_id INTEGER NOT NULL,
   customer_id INTEGER NOT NULL,
+  quantity DOUBLE NOT NULL,
+  created_on TEXT NOT NULL,
 
   FOREIGN KEY(product_id) REFERENCES products(id),
   FOREIGN KEY(customer_id) REFERENCES customers(id)

@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, web, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
 use uuid::Uuid;
 
 use diesel::prelude::*;
@@ -13,6 +13,7 @@ use crate::{
     },
 };
 
+#[get("")]
 pub async fn get(
     order_uid: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
@@ -84,6 +85,7 @@ pub async fn get(
     }
 }
 
+#[get("/{od_uuid}")]
 pub async fn get_order_detail(
     od_uuid: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
@@ -141,6 +143,7 @@ pub async fn get_order_detail(
     }
 }
 
+#[post("/{ord_id}/add")]
 pub async fn add_order_detail(
     ord_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
