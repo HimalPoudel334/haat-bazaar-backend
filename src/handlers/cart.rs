@@ -1,10 +1,9 @@
-use actix_web::{get, post};
-use actix_web::{http::StatusCode, web, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, patch, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 use diesel::SelectableHelper;
 use uuid::Uuid;
 
-use crate::contracts::cart::{Cart, NewCart};
+use crate::contracts::cart::{Cart, NewCart, UpdateCartQuantity};
 use crate::models::cart::{Cart as CartModel, NewCartItem};
 use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
@@ -182,5 +181,104 @@ pub async fn create(
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
+#[patch("/{cart_id}/update-quantity")]
+pub async fn update_quantity(
+    cart_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+    quantity_vm: web::Json<UpdateCartQuantity>,
+) -> impl Responder {
+    let cart_uuid: String = cart_id.into_inner().0;
+
+    //check if product_quantity is greater than 0
+    if quantity_vm.new_quantity <= 0.25 {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Quantity must be greater than 0.25 sku"}));
+    }
+
+    //check if the customer id is valid uuid or not
+    let cart_uuid: Uuid = match Uuid::parse_str(&cart_uuid) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid cart id"}))
+        }
+    };
+
+    use crate::schema::carts;
+    use crate::schema::carts::dsl::*;
+    use crate::schema::products::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
+    let cart: CartModel = match carts
+        .filter(carts::uuid.eq(&cart_uuid.to_string()))
+        .select(CartModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    //get the product for the cart
+    let product: ProductModel = match products
+        .find(cart.get_product_id())
+        .select(ProductModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    // validate the quantity against the stock of the product
+    if quantity_vm.new_quantity > product.get_stock() {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Requested quantity is greater than stock"}));
+    }
+
+    match diesel::update(&cart)
+        .set(carts::quantity.eq(quantity_vm.new_quantity))
+        .get_result::<CartModel>(conn)
+    {
+        Ok(c) => {
+            let cart_vm: Cart = Cart {
+                uuid: c.get_uuid().to_owned(),
+                product_id: product.get_uuid().to_owned(),
+                quantity: c.get_quantity(),
+                created_on: c.get_created_on().to_owned(),
+                product_name: product.get_name().to_owned(),
+            };
+            HttpResponse::Ok().status(StatusCode::OK).json(cart_vm)
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
     }
 }

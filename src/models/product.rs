@@ -41,6 +41,10 @@ impl Product {
         self.price
     }
 
+    pub fn get_stock(&self) -> f64 {
+        self.stock
+    }
+
     //oh lord have mercy
     //I have created a dependency of this model to contracts which should be avoided
     pub fn as_response(&self, category: &Category) -> crate::contracts::product::Product {

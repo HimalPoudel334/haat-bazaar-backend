@@ -21,3 +21,8 @@ pub struct NewCart {
     pub quantity: f64,
     pub created_on: String,
 }
+
+#[derive(Deserialize)]
+pub struct UpdateCartQuantity {
+    pub new_quantity: f64,
+}
