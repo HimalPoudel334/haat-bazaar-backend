@@ -10,14 +10,18 @@ use crate::{
 #[post("")]
 pub async fn create(
     category: web::Json<CategoryCreate>,
-    db_conn_pool: web::Data<SqliteConnectionPool>,
+    pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::categories::dsl::*;
+
+    //create a connection to db
+    let conn = &mut get_conn(&pool);
+
     //check if category already exists
     match categories
         .filter(name.like(format!("%{}%", category.name.to_owned())))
         .select(name)
-        .first::<String>(&mut get_conn(&db_conn_pool))
+        .first::<String>(conn)
         .optional()
     {
         Ok(cat) => match cat {
@@ -28,7 +32,7 @@ pub async fn create(
                 let category: NewCategory = NewCategory::new(category.name.to_owned());
                 match diesel::insert_into(categories)
                     .values(&category)
-                    .execute(&mut get_conn(&db_conn_pool)) {
+                    .execute(conn) {
                         Ok(_) => HttpResponse::Ok().json(category),
                         Err(_) => HttpResponse::InternalServerError().finish()
                     }
@@ -44,9 +48,13 @@ pub async fn create(
 #[get("")]
 pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     use crate::schema::categories::dsl::*;
+
+    //create a connection to db
+    let conn = &mut get_conn(&pool);
+
     let categories_vec = categories
         .select((uuid, name))
-        .load::<Category>(&mut get_conn(&pool));
+        .load::<Category>(conn);
 
     match categories_vec {
         Ok(cat_v) => HttpResponse::Ok().json(serde_json::json!({"categories": cat_v})),
@@ -61,11 +69,16 @@ pub async fn get_category(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::categories::dsl::*;
+
     let uid: String = category_id.into_inner().0; //uid = uuid
+
+    //create a connection to db
+    let conn = &mut get_conn(&pool);
+
     match categories
         .filter(uuid.eq(uid))
         .select((uuid, name))
-        .first::<Category>(&mut get_conn(&pool))
+        .first::<Category>(conn)
         .optional()
     {
         Ok(cat) => match cat {
@@ -88,11 +101,16 @@ pub async fn edit(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::categories::dsl::*;
+
     let uid: String = category_id.into_inner().0;
+
+    //create a connection to db
+    let conn = &mut get_conn(&pool);
+
     match diesel::update(categories)
         .filter(uuid.eq(&uid))
         .set(name.eq(category_update.name.to_owned()))
-        .execute(&mut get_conn(&pool)) 
+        .execute(conn) 
         //all this match can be shortened if used get_result() but how?
     {
         Ok(urc) if urc > 0 => {
@@ -125,9 +143,14 @@ pub async fn delete(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::categories::dsl::*;
+    
     let uid: String = category_id.into_inner().0;
+
+    //create a connection to db
+    let conn = &mut get_conn(&pool);
+
     match diesel::delete(categories.filter(uuid.eq(uid)))
-        .execute(&mut get_conn(&pool))
+        .execute(conn)
     {
         //drc = deleted_row_count
         //execute() function returns the number of row affected

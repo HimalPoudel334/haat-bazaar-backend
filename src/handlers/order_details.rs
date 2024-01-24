@@ -33,10 +33,13 @@ pub async fn get(
     use crate::schema::products::dsl::*;
     use crate::schema::{order_details, orders, products};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let order: OrderModel = match orders
         .filter(orders::uuid.eq(&order_uid.to_string()))
         .select(OrderModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(o)) => o,
@@ -60,7 +63,7 @@ pub async fn get(
     //     order_details::quantity,
     //     order_details::product_id,
     //
-    // )).load<OrderDetails>::(&mut get_conn(&pool)).optional() {
+    // )).load<OrderDetails>::(conn).optional() {
     //
     //     };
     //
@@ -76,7 +79,7 @@ pub async fn get(
             order_details::quantity,
             order_details::price,
         ))
-        .load::<OrderDetails>(&mut get_conn(&pool))
+        .load::<OrderDetails>(conn)
     {
         Ok(ods) => HttpResponse::Ok().status(StatusCode::OK).json(ods),
         Err(_) => HttpResponse::InternalServerError()
@@ -105,10 +108,13 @@ pub async fn get_order_detail(
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match order_details
         .filter(order_details::uuid.eq(&order_detail_uid.to_string()))
         .select(OrderDetailsModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(od)) => {
@@ -116,13 +122,13 @@ pub async fn get_order_detail(
             let prod: ProductModel = products
                 .find(od.get_product_id())
                 .select(ProductModel::as_select())
-                .first(&mut get_conn(&pool))
+                .first(conn)
                 .unwrap();
 
             let ord: OrderModel = orders
                 .find(od.get_order_id())
                 .select(OrderModel::as_select())
-                .first(&mut get_conn(&pool))
+                .first(conn)
                 .unwrap();
 
             let order_det: OrderDetails = OrderDetails {
@@ -166,10 +172,13 @@ pub async fn add_order_detail(
     use crate::schema::products::dsl::*;
     use crate::schema::{orders, products};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let order: OrderModel = match orders
         .filter(orders::uuid.eq(&ord_id.to_string()))
         .select(OrderModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(o)) => o,
@@ -189,7 +198,7 @@ pub async fn add_order_detail(
     let prod_bought: ProductModel = match products
         .filter(products::uuid.eq(&ord_det.product_id))
         .select(ProductModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(p)) => p,
@@ -209,10 +218,7 @@ pub async fn add_order_detail(
     let od: NewOrderDetailModel =
         NewOrderDetailModel::new(ord_det.quantity, ord_det.price, &prod_bought, &order);
 
-    match diesel::insert_into(order_details)
-        .values(&od)
-        .execute(&mut get_conn(&pool))
-    {
+    match diesel::insert_into(order_details).values(&od).execute(conn) {
         Ok(_) => HttpResponse::Ok()
             .status(StatusCode::OK)
             .json(serde_json::json!({"message": "order detail added"})),

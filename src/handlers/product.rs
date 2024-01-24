@@ -24,6 +24,9 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     use crate::schema::products;
     use crate::schema::products::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let product_vec = products
         .inner_join(categories)
         .select((
@@ -39,7 +42,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
             categories::uuid,
             categories::name,
         ))
-        .load::<Product>(&mut get_conn(&pool));
+        .load::<Product>(conn);
 
     match product_vec {
         Ok(p) => HttpResponse::Ok()
@@ -60,11 +63,14 @@ pub async fn create(
     use crate::schema::categories::dsl::*;
     use crate::schema::products::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     //check if the provided category exists or not
     let category: CategoryModel = match categories
         .filter(categories::uuid.eq(&product_json.category_id))
         .select(CategoryModel::as_select())
-        .first::<CategoryModel>(&mut get_conn(&pool))
+        .first::<CategoryModel>(conn)
         .optional()
     {
         Ok(Some(c)) => c,
@@ -96,7 +102,7 @@ pub async fn create(
     //insert the product to db
     match diesel::insert_into(products)
         .values(&product)
-        .get_result::<ProductModel>(&mut get_conn(&pool))
+        .get_result::<ProductModel>(conn)
     {
         Ok(p) => HttpResponse::Ok()
             .status(StatusCode::OK)
@@ -119,18 +125,19 @@ pub async fn get_product(
     use crate::schema::products;
     use crate::schema::products::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match products
         .filter(products::uuid.eq(&prod_uuid))
         .select(ProductModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(prod) => match prod {
             Some(p) => {
-                let category: CategoryModel = categories
-                    .find(p.get_category_id())
-                    .first(&mut get_conn(&pool))
-                    .unwrap();
+                let category: CategoryModel =
+                    categories.find(p.get_category_id()).first(conn).unwrap();
                 HttpResponse::Ok()
                     .status(StatusCode::OK)
                     .json(p.as_response(&category))
@@ -158,10 +165,13 @@ pub async fn edit(
     use crate::schema::products;
     use crate::schema::products::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let product: ProductModel = match products
         .filter(products::uuid.eq(&prod_uuid))
         .select(ProductModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(prod) => match prod {
@@ -183,7 +193,7 @@ pub async fn edit(
     let category: CategoryModel = match categories
         .filter(categories::uuid.eq(&product_json.category_id))
         .select(CategoryModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(cat) => match cat {
@@ -214,7 +224,7 @@ pub async fn edit(
             stock.eq(product_json.stock),
             category_id.eq(category.get_id()),
         ))
-        .get_result::<ProductModel>(&mut get_conn(&pool))
+        .get_result::<ProductModel>(conn)
     {
         Ok(updated_product) => HttpResponse::Ok()
             .status(StatusCode::OK)
@@ -236,6 +246,9 @@ pub async fn update_product_category(
     use crate::schema::categories::dsl::*;
     use crate::schema::products::dsl::*;
     use crate::schema::{categories, products};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
 
     //check if the product_id is valid uuid or not before trip to db
     let prod_uuid: Uuid = match Uuid::parse_str(prod_uuid.as_str()) {
@@ -260,7 +273,7 @@ pub async fn update_product_category(
     let category: CategoryModel = match categories
         .filter(categories::uuid.eq(&category_update.uuid))
         .select(CategoryModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(c)) => c,
@@ -279,7 +292,7 @@ pub async fn update_product_category(
     match diesel::update(products)
         .filter(products::uuid.eq(&prod_uuid.to_string()))
         .set(category_id.eq(&category.get_id()))
-        .execute(&mut get_conn(&pool))
+        .execute(conn)
     {
         Ok(urc) if urc > 0 => HttpResponse::Ok().status(StatusCode::OK).finish(),
         Ok(_) => HttpResponse::NotFound()
@@ -310,11 +323,15 @@ pub async fn update_product_stock(
     };
 
     use crate::schema::products::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     //update the product's stock
     match diesel::update(products)
         .filter(uuid.eq(&prod_uuid.to_string()))
         .set(stock.eq(new_stock.stock))
-        .execute(&mut get_conn(&pool))
+        .execute(conn)
     {
         Ok(urc) if urc > 0 => HttpResponse::Ok().status(StatusCode::OK).finish(),
         Ok(_) => HttpResponse::NotFound()
@@ -352,11 +369,15 @@ pub async fn upload_product_images(
 
     use crate::schema::products;
     use crate::schema::products::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     //get the product for the uuid
     let product: ProductModel = match products
         .filter(products::uuid.eq(&prod_uuid.to_string()))
         .select(ProductModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(p)) => p,
@@ -390,7 +411,7 @@ pub async fn upload_product_images(
         match diesel
         ::update(&product)
             .set(image.eq(&path))
-            .execute(&mut get_conn(&pool))
+            .execute(conn)
         {
             Ok(urc) => {
                 if urc <= 0 {
@@ -420,7 +441,7 @@ pub async fn upload_product_images(
         let product_image: NewProductImage = NewProductImage::new(&path, &product);
         match diesel::insert_into(product_images)
             .values(&product_image)
-            .execute(&mut get_conn(&pool))
+            .execute(conn)
         {
             Ok(_) => {}
             Err(_) => return HttpResponse::InternalServerError()

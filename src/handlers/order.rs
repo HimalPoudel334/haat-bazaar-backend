@@ -18,6 +18,9 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     use crate::schema::orders::dsl::*;
     use crate::schema::{customers, orders};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let orders_vec: Vec<Order> = match orders
         .inner_join(customers)
         .select((
@@ -29,7 +32,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
             total_price,
             customers::uuid,
         ))
-        .load::<Order>(&mut get_conn(&pool))
+        .load::<Order>(conn)
     {
         Ok(o) => o,
         Err(_) => {
@@ -65,6 +68,9 @@ pub async fn get_order(
     use crate::schema::orders::dsl::*;
     use crate::schema::{customers, orders};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match orders
         .inner_join(customers)
         .filter(orders::uuid.eq(&order_id.to_string()))
@@ -77,7 +83,7 @@ pub async fn get_order(
             total_price,
             customers::uuid,
         ))
-        .first::<Order>(&mut get_conn(&pool))
+        .first::<Order>(conn)
         .optional()
     {
         Ok(Some(o)) => HttpResponse::Ok().status(StatusCode::OK).json(o),
@@ -111,10 +117,13 @@ pub async fn create(
     use crate::schema::products::dsl::*;
     use crate::schema::{customers, products};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let customer: CustomerModel = match customers
         .filter(customers::uuid.eq(customer_uuid.to_string()))
         .select(CustomerModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(c)) => c,
@@ -140,7 +149,7 @@ pub async fn create(
 
     match diesel::insert_into(orders)
         .values(&order)
-        .get_result::<OrderModel>(&mut get_conn(&pool))
+        .get_result::<OrderModel>(conn)
     {
         Ok(o) => {
             //if any one of this failed, then god will help
@@ -148,7 +157,7 @@ pub async fn create(
                 let pr: ProductModel = match products
                     .filter(products::uuid.eq(&order_detail.product_id))
                     .select(ProductModel::as_select())
-                    .first(&mut get_conn(&pool))
+                    .first(conn)
                     .optional()
                 {
                     Ok(Some(p)) => p,
@@ -169,7 +178,7 @@ pub async fn create(
 
                 diesel::insert_into(order_details)
                     .values(&od)
-                    .execute(&mut get_conn(&pool))
+                    .execute(conn)
                     .unwrap();
             }
 
@@ -222,11 +231,14 @@ pub async fn edit(
     use crate::schema::orders::dsl::*;
     use crate::schema::{customers, orders};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     //find the order
     let order: OrderModel = match orders
         .filter(orders::uuid.eq(&order_uid.to_string()))
         .select(OrderModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(o)) => o,
@@ -246,7 +258,7 @@ pub async fn edit(
     let customer: CustomerModel = match customers
         .filter(customers::uuid.eq(customer_uuid.to_string()))
         .select(CustomerModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(c)) => c,
@@ -270,7 +282,7 @@ pub async fn edit(
             delivery_location.eq(&order_json.delivery_location),
             total_price.eq(order_json.total_price),
         ))
-        .get_result::<OrderModel>(&mut get_conn(&pool))
+        .get_result::<OrderModel>(conn)
     {
         Ok(o) => {
             let order: Order = Order {
@@ -322,10 +334,13 @@ pub async fn update_delivery_status(
     //find the order
     use crate::schema::orders::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let order: OrderModel = match orders
         .filter(uuid.eq(&order_uid.to_string()))
         .select(OrderModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(o)) => o,
@@ -343,7 +358,7 @@ pub async fn update_delivery_status(
 
     match diesel::update(&order)
         .set(delivery_status.eq(status.value()))
-        .get_result::<OrderModel>(&mut get_conn(&pool))
+        .get_result::<OrderModel>(conn)
     {
         Ok(o) => {
             let order: Order = Order {

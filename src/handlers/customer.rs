@@ -13,9 +13,13 @@ use crate::{
 #[get("")]
 pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     use crate::schema::customers::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     let customers_vec = customers
         .select((uuid, first_name, last_name, phone_number))
-        .load::<Customer>(&mut get_conn(&pool));
+        .load::<Customer>(conn);
 
     match customers_vec {
         Ok(cust_v) => HttpResponse::Ok()
@@ -33,6 +37,7 @@ pub async fn create(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::customers::dsl::*;
+
     let phone_num: PhoneNumber = match PhoneNumber::from_str(customer.phone_number.to_owned()) {
         Ok(phone) => phone,
         Err(e) => {
@@ -42,10 +47,13 @@ pub async fn create(
         }
     };
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match customers
         .filter(phone_number.eq(&customer.phone_number))
         .select(CustomerModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(Some(_)) => HttpResponse::Conflict()
@@ -61,7 +69,7 @@ pub async fn create(
 
             match diesel::insert_into(customers)
                 .values(&new_customer)
-                .get_result::<CustomerModel>(&mut get_conn(&pool))
+                .get_result::<CustomerModel>(conn)
             {
                 Ok(c) => {
                     let customer_created: Customer = Customer {
@@ -103,10 +111,13 @@ pub async fn get_customer(
 
     use crate::schema::customers::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match customers
         .filter(uuid.eq(uid.to_string()))
         .select(Customer::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(cust) => match cust {
@@ -139,10 +150,13 @@ pub async fn get_customer_from_phone_number(
 
     use crate::schema::customers::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     match customers
         .filter(phone_number.eq(&ph_num.get_number()))
         .select(Customer::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(cust) => match cust {
@@ -186,11 +200,14 @@ pub async fn edit(
 
     use crate::schema::customers::dsl::*;
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     //check if the new phone number is already used or not
     let customer_from_phone = match customers
         .filter(phone_number.eq(customer_update.phone_number.to_string()))
         .select(CustomerModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(cu) => match cu {
@@ -207,7 +224,7 @@ pub async fn edit(
     let customer: CustomerModel = match customers
         .filter(uuid.eq(uid.to_string()))
         .select(CustomerModel::as_select())
-        .first(&mut get_conn(&pool))
+        .first(conn)
         .optional()
     {
         Ok(cu) => match cu {
@@ -239,7 +256,7 @@ pub async fn edit(
             last_name.eq(&customer_update.last_name),
             phone_number.eq(&customer_update.phone_number),
         ))
-        .execute(&mut get_conn(&pool))
+        .execute(conn)
     {
         Ok(_) => HttpResponse::Ok()
             .status(StatusCode::OK)
