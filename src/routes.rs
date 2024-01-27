@@ -42,5 +42,10 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(order_details::get_order_detail)
             .service(order_details::add_order_detail),
     )
-    .service(web::scope("/carts").service(cart::get));
+    .service(
+        web::scope("/carts")
+            .service(cart::get)
+            .service(cart::create)
+            .service(cart::update_quantity),
+    );
 }

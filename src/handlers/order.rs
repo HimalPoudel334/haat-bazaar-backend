@@ -44,7 +44,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
 
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"data": orders_vec}))
+        .json(serde_json::json!({"orders": orders_vec}))
 }
 
 #[get("/{order_id}")]
@@ -111,6 +111,17 @@ pub async fn create(
         }
     };
 
+    let mut order_total: f64 = 0.0;
+    (&order_json.order_details).into_iter().for_each(|od| {
+        order_total += od.price;
+    });
+
+    if order_total != order_json.total_price {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
+    }
+
     use crate::schema::customers::dsl::*;
     use crate::schema::order_details::dsl::*;
     use crate::schema::orders::dsl::*;
@@ -173,11 +184,23 @@ pub async fn create(
                     }
                 };
 
+                if pr.get_stock() < order_detail.quantity {
+                    return HttpResponse::BadRequest()
+                            .status(StatusCode::BAD_REQUEST)
+                            .json(serde_json::json!({"message": "Ordered product quantity is greater than stock"}));
+                }
+
                 let od: NewOrderDetailModel =
                     NewOrderDetailModel::new(order_detail.quantity, order_detail.price, &pr, &o);
 
                 diesel::insert_into(order_details)
                     .values(&od)
+                    .execute(conn)
+                    .unwrap();
+
+                //update the product stock if order creation successful
+                diesel::update(&pr)
+                    .set(products::stock.eq(products::stock - order_detail.quantity))
                     .execute(conn)
                     .unwrap();
             }

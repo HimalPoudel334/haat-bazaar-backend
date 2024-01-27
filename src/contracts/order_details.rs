@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 #[derive(Queryable)]
 pub struct OrderDetails {
+    #[serde(rename = "id")]
     pub uuid: String,
     pub product_id: String,
     pub order_id: String,

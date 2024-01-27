@@ -7,6 +7,7 @@ use super::order_details::NewOrderDetail;
 #[diesel(table_name = crate::schema::orders)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
+    #[serde(rename = "id")]
     pub uuid: String,
     pub created_on: String,
     pub fulfilled_on: String,
