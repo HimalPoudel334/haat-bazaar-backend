@@ -48,6 +48,10 @@ impl Order {
     pub fn get_delivery_status(&self) -> &str {
         &self.delivery_status
     }
+
+    pub fn get_customer_id(&self) -> i32 {
+        self.customer_id
+    }
 }
 
 #[derive(Insertable)]
