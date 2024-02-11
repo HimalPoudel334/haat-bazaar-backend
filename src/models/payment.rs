@@ -39,6 +39,10 @@ impl Payment {
     pub fn get_amount(&self) -> f64 {
         self.amount
     }
+
+    pub fn get_customer_id(&self) -> i32 {
+        self.customer_id
+    }
 }
 
 #[derive(Insertable)]

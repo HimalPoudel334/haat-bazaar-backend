@@ -1,5 +1,5 @@
 use ::uuid::Uuid;
-use actix_web::{http::StatusCode, web, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
 use crate::{
@@ -13,6 +13,8 @@ use crate::{
     },
 };
 
+// I think any other method should not exists
+#[post("")]
 pub async fn create(
     payment_json: web::Json<NewPayment>,
     pool: web::Data<SqliteConnectionPool>,
@@ -136,4 +138,101 @@ pub async fn create(
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
+}
+
+#[get("/{order_id}")]
+pub async fn get(
+    ord_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    //first check if the order_id is valid or not
+    let ord_id: String = ord_id.into_inner().0;
+
+    let ord_id: Uuid = match Uuid::parse_str(&ord_id) {
+        Ok(o) => o,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid order id"}))
+        }
+    };
+
+    //check if payment exists or not
+    use crate::schema::customers::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::{orders, payments};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    let order: OrderModel = match orders
+        .filter(orders::uuid.eq(&ord_id.to_string()))
+        .select(OrderModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid order id"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let payment: PaymentModel = match payments
+        .filter(payments::order_id.eq(order.get_id()))
+        .select(PaymentModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Payment not found for order."}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let customer: CustomerModel = match customers
+        .find(payment.get_customer_id())
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Invalid customer id for payment"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let payment_response: Payment = Payment {
+        uuid: payment.get_uuid().to_owned(),
+        customer_id: customer.get_uuid().to_owned(),
+        order_id: order.get_uuid().to_owned(),
+        pay_date: payment.get_pay_date().to_owned(),
+        amount: payment.get_amount(),
+        payment_method: payment.get_payment_method().to_owned(),
+    };
+
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(payment_response)
 }
