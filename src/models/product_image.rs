@@ -5,14 +5,14 @@ use super::product::Product;
 #[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::product_images)]
 #[diesel(belongs_to(Product))]
-pub struct ProductImages {
+pub struct ProductImage {
     id: i32,
     uuid: String,
     image_name: String,
     product_id: i32,
 }
 
-impl ProductImages {
+impl ProductImage {
     pub fn get_id(&self) -> i32 {
         self.id
     }

@@ -8,7 +8,7 @@ use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         order::Order as OrderModel,
-        order_details::{NewOrderDetail as NewOrderDetailModel, OrderDetails as OrderDetailsModel},
+        order_detail::{NewOrderDetail as NewOrderDetailModel, OrderDetail as OrderDetailsModel},
         product::Product as ProductModel,
     },
 };

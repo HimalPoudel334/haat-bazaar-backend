@@ -7,7 +7,7 @@ use super::{order::Order, product::Product};
 #[diesel(table_name = crate::schema::order_details)]
 #[diesel(belongs_to(Order))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct OrderDetails {
+pub struct OrderDetail {
     id: i32,
     uuid: String,
     quantity: f64,
@@ -16,7 +16,7 @@ pub struct OrderDetails {
     price: f64,
 }
 
-impl OrderDetails {
+impl OrderDetail {
     pub fn get_id(&self) -> i32 {
         self.id
     }
