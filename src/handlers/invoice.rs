@@ -5,8 +5,12 @@ use crate::{
     contracts::invoice::NewInvoice,
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel, invoice::NewInvoice as NewInvoiceModel,
-        order::Order as OrderModel, payment::Payment as PaymentModel,
+        customer::Customer as CustomerModel,
+        invoice::{Invoice as InvoiceModel, NewInvoice as NewInvoiceModel},
+        invoice_item::NewInvoiceItem as NewInvoiceItemModel,
+        order::Order as OrderModel,
+        payment::Payment as PaymentModel,
+        product::Product as ProductModel,
     },
 };
 
@@ -15,9 +19,12 @@ pub fn create(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::customers::dsl::*;
-    use crate::schema::orders;
+    use crate::schema::invoice_items::dsl::*;
+    use crate::schema::invoices::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{orders, products};
 
     //get a database connection for pool
     let conn = &mut get_conn(&pool);
@@ -106,5 +113,63 @@ pub fn create(
         &payment,
     );
 
-    HttpResponse::Ok().into()
+    match diesel::insert_into(invoices)
+        .values(&new_invoice)
+        .get_result::<InvoiceModel>(conn)
+    {
+        Ok(inv) => {
+            for inv_item in &inv_json.invoice_items {
+                let prod: ProductModel = match products
+                    .filter(products::uuid.eq(&inv_item.product_id))
+                    .select(ProductModel::as_select())
+                    .first(conn)
+                    .optional()
+                {
+                    Ok(Some(p)) => p,
+                    Ok(None) => {
+                        return HttpResponse::BadRequest()
+                            .status(StatusCode::BAD_REQUEST)
+                            .json(serde_json::json!({"message": "Product not found"}))
+                    }
+                    Err(_) => {
+                        return HttpResponse::InternalServerError()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
+                    }
+                };
+
+                // Handle discount amount and discount percent
+                let mut dis_percent: f64 = 0.0;
+                let mut dis_amt: f64 = 0.0;
+
+                if let Some(d_a) = inv_item.discount_amount {
+                    dis_percent = d_a / prod.get_price() * 100.0;
+                } 
+
+                if let Some(d_p) = inv_item.discount_percent {
+                    dis_amt = prod.get_price() * d_p / 100.0;
+                } 
+
+                // Check if either discount percent or discount amount has been set
+                if dis_percent == 0.0 && dis_amt == 0.0 {
+                    return HttpResponse::BadRequest()
+                            .status(StatusCode::BAD_REQUEST)
+                            .json(serde_json::json!({"message": "Either discount percent or discount amount has to be set"}));
+                }
+
+                let inv_item_model: NewInvoiceItemModel =
+                    NewInvoiceItemModel::new(&prod, &inv, inv_item.quantity, dis_percent, dis_amt);
+
+                diesel::insert_into(invoice_items)
+                    .values(&inv_item_model)
+                    .execute(conn)
+                    .unwrap();
+            }
+            HttpResponse::Ok().into()
+        }
+        Err(_) => return HttpResponse::InternalServerError()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .json(serde_json::json!({"message": "Ops! something went wrong while inserting invoice item"}))
+
+    }
 }

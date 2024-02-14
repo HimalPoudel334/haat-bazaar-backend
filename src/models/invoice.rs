@@ -1,23 +1,14 @@
+use diesel::prelude::*;
 use uuid::Uuid;
 
 use super::{customer::Customer, order::Order, payment::Payment};
 
+#[derive(Queryable, Selectable, Associations, Identifiable)]
+#[diesel(table_name = crate::schema::invoices)]
+#[diesel(belongs_to(Order))]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Invoice {
     id: i32,
-    uuid: String,
-    invoice_number: i32,
-    invoice_date: String,
-    sub_total: f64,
-    vat_percent: f64,
-    vat_amount: f64,
-    net_amount: f64,
-
-    order_id: i32,
-    customer_id: i32,
-    payment_id: i32,
-}
-
-pub struct NewInvoice {
     uuid: String,
     invoice_number: i32,
     invoice_date: String,
@@ -71,6 +62,22 @@ impl Invoice {
     pub fn order_id(&self) -> i32 {
         self.order_id
     }
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::invoices)]
+pub struct NewInvoice {
+    uuid: String,
+    invoice_number: i32,
+    invoice_date: String,
+    sub_total: f64,
+    vat_percent: f64,
+    vat_amount: f64,
+    net_amount: f64,
+
+    order_id: i32,
+    customer_id: i32,
+    payment_id: i32,
 }
 
 impl NewInvoice {

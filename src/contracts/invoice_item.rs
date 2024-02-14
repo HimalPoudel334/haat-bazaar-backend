@@ -15,7 +15,7 @@ pub struct InvoiceItem {
 #[derive(Deserialize)]
 pub struct NewInvoiceItem {
     pub product_id: String,
-    pub invoice_id: String,
+    pub invoice_id: Option<String>,
     pub quantity: f64,
     pub unit_price: f64,
     pub discount_percent: Option<f64>,
