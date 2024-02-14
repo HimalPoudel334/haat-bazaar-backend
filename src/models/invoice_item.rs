@@ -5,13 +5,14 @@ use super::{invoice::Invoice, product::Product};
 pub struct InvoiceItem {
     id: i32,
     uuid: String,
-    product_id: i32,
-    invoice_id: i32,
     quantity: f64,
     unit_price: f64,
     discount_percent: f64,
     discount_amount: f64,
     total: f64,
+
+    invoice_id: i32,
+    product_id: i32,
 }
 
 pub struct NewInvoiceItem {
