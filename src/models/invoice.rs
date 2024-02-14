@@ -31,6 +31,48 @@ pub struct NewInvoice {
     payment_id: i32,
 }
 
+impl Invoice {
+    pub fn get_id(&self) -> i32 {
+        self.id
+    }
+
+    pub fn uuid(&self) -> &str {
+        &self.uuid
+    }
+
+    pub fn invoice_number(&self) -> i32 {
+        self.invoice_number
+    }
+
+    pub fn sub_total(&self) -> f64 {
+        self.sub_total
+    }
+
+    pub fn invoice_date(&self) -> &str {
+        &self.invoice_date
+    }
+
+    pub fn vat_percent(&self) -> f64 {
+        self.vat_percent
+    }
+
+    pub fn vat_amount(&self) -> f64 {
+        self.vat_amount
+    }
+
+    pub fn net_amount(&self) -> f64 {
+        self.net_amount
+    }
+
+    pub fn customer_id(&self) -> i32 {
+        self.customer_id
+    }
+
+    pub fn order_id(&self) -> i32 {
+        self.order_id
+    }
+}
+
 impl NewInvoice {
     pub fn new(
         invoice_date: &String,

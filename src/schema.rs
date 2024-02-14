@@ -31,6 +31,36 @@ diesel::table! {
 }
 
 diesel::table! {
+    invoice_items (id) {
+        id -> Integer,
+        uuid -> Text,
+        quantity -> Double,
+        unit_price -> Double,
+        discount_percent -> Double,
+        discount_amount -> Double,
+        total -> Double,
+        product_id -> Integer,
+        invoice_id -> Integer,
+    }
+}
+
+diesel::table! {
+    invoices (id) {
+        id -> Integer,
+        uuid -> Text,
+        invoice_number -> Integer,
+        invoice_date -> Text,
+        sub_total -> Double,
+        vat_percent -> Double,
+        vat_amount -> Double,
+        net_amount -> Double,
+        order_id -> Integer,
+        customer_id -> Integer,
+        payment_id -> Integer,
+    }
+}
+
+diesel::table! {
     order_details (id) {
         id -> Integer,
         uuid -> Text,
@@ -107,6 +137,11 @@ diesel::table! {
 
 diesel::joinable!(carts -> customers (customer_id));
 diesel::joinable!(carts -> products (product_id));
+diesel::joinable!(invoice_items -> invoices (invoice_id));
+diesel::joinable!(invoice_items -> products (product_id));
+diesel::joinable!(invoices -> customers (customer_id));
+diesel::joinable!(invoices -> orders (order_id));
+diesel::joinable!(invoices -> payments (payment_id));
 diesel::joinable!(order_details -> orders (order_id));
 diesel::joinable!(order_details -> products (product_id));
 diesel::joinable!(orders -> customers (customer_id));
@@ -120,6 +155,8 @@ diesel::allow_tables_to_appear_in_same_query!(
     carts,
     categories,
     customers,
+    invoice_items,
+    invoices,
     order_details,
     orders,
     payments,
