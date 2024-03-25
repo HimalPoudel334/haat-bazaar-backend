@@ -49,6 +49,12 @@ pub fn create(
         }
     };
 
+    if order.get_total_price() != inv_json.sub_total {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Invoice total and order total do not match"}));
+    }
+
     //check if payment is done or not
     let payment: PaymentModel = match payments
         .find(order.get_id())
@@ -118,58 +124,93 @@ pub fn create(
         .get_result::<InvoiceModel>(conn)
     {
         Ok(inv) => {
-            for inv_item in &inv_json.invoice_items {
-                let prod: ProductModel = match products
-                    .filter(products::uuid.eq(&inv_item.product_id))
-                    .select(ProductModel::as_select())
-                    .first(conn)
-                    .optional()
-                {
-                    Ok(Some(p)) => p,
-                    Ok(None) => {
+            if inv_json.invoice_items.is_empty() {
+                return HttpResponse::BadRequest()
+                    .status(StatusCode::BAD_REQUEST)
+                    .json(serde_json::json!({"message": "Error! no invoice items provided"}));
+            } else {
+                for inv_item in &inv_json.invoice_items {
+                    let prod: ProductModel = match products
+                        .filter(products::uuid.eq(&inv_item.product_id))
+                        .select(ProductModel::as_select())
+                        .first(conn)
+                        .optional()
+                    {
+                        Ok(Some(p)) => p,
+                        Ok(None) => {
+                            return HttpResponse::BadRequest()
+                                .status(StatusCode::BAD_REQUEST)
+                                .json(serde_json::json!({"message": "Product not found"}))
+                        }
+                        Err(_) => {
+                            return HttpResponse::InternalServerError()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+                        }
+                    };
+
+                    if prod.get_stock() < inv_item.quantity {
                         return HttpResponse::BadRequest()
                             .status(StatusCode::BAD_REQUEST)
-                            .json(serde_json::json!({"message": "Product not found"}))
+                            .json(serde_json::json!({"message": "Product quantity is more than stock"}));
                     }
-                    Err(_) => {
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
+
+                    // Handle discount amount and discount percent
+                    let mut dis_percent: f64 = 0.0;
+                    let mut dis_amt: f64 = 0.0;
+
+                    if let Some(d_a) = inv_item.discount_amount {
+                        dis_percent = d_a / prod.get_price() * 100.0;
                     }
-                };
 
-                // Handle discount amount and discount percent
-                let mut dis_percent: f64 = 0.0;
-                let mut dis_amt: f64 = 0.0;
+                    if let Some(d_p) = inv_item.discount_percent {
+                        dis_amt = prod.get_price() * d_p / 100.0;
+                    }
 
-                if let Some(d_a) = inv_item.discount_amount {
-                    dis_percent = d_a / prod.get_price() * 100.0;
-                } 
+                    // Check if either discount percent or discount amount has been set
+                    if dis_percent == 0.0 && dis_amt == 0.0 {
+                        return HttpResponse::BadRequest()
+                                .status(StatusCode::BAD_REQUEST)
+                                .json(serde_json::json!({"message": "Either discount percent or discount amount has to be set"}));
+                    }
 
-                if let Some(d_p) = inv_item.discount_percent {
-                    dis_amt = prod.get_price() * d_p / 100.0;
-                } 
+                    let inv_item_model: NewInvoiceItemModel = NewInvoiceItemModel::new(
+                        &prod,
+                        &inv,
+                        inv_item.quantity,
+                        dis_percent,
+                        dis_amt,
+                    );
 
-                // Check if either discount percent or discount amount has been set
-                if dis_percent == 0.0 && dis_amt == 0.0 {
-                    return HttpResponse::BadRequest()
-                            .status(StatusCode::BAD_REQUEST)
-                            .json(serde_json::json!({"message": "Either discount percent or discount amount has to be set"}));
+                    match diesel::insert_into(invoice_items)
+                        .values(&inv_item_model)
+                        .execute(conn)
+                        {
+                            Ok(_) => {
+                                match diesel::update(&prod)
+                                    .set(stock.eq(stock - inv_item.quantity))
+                                    .execute(conn)
+                                {
+                                    Ok(_) => {}
+                                    Err(_) => return HttpResponse::InternalServerError()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .json(serde_json::json!({"message": "Ops! something went wrong while updating product"})),
+                                }
+                            }
+                            Err(_) => return HttpResponse::InternalServerError()
+                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                        .json(serde_json::json!({"message": "Ops! something went wrong while inserting invoice item"}))
+                        }
                 }
-
-                let inv_item_model: NewInvoiceItemModel =
-                    NewInvoiceItemModel::new(&prod, &inv, inv_item.quantity, dis_percent, dis_amt);
-
-                diesel::insert_into(invoice_items)
-                    .values(&inv_item_model)
-                    .execute(conn)
-                    .unwrap();
+                HttpResponse::Ok()
+                    .status(StatusCode::OK)
+                    .json(serde_json::json!({"message": "Invoice added successfully"}))
             }
-            HttpResponse::Ok().into()
         }
-        Err(_) => return HttpResponse::InternalServerError()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .json(serde_json::json!({"message": "Ops! something went wrong while inserting invoice item"}))
-
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong while inserting invoice"}),
+            ),
     }
 }
