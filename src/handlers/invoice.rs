@@ -1,8 +1,12 @@
 use actix_web::{http::StatusCode, web, HttpResponse, Responder};
 use diesel::prelude::*;
+use uuid::Uuid;
 
 use crate::{
-    contracts::invoice::NewInvoice,
+    contracts::{
+        invoice::{Invoice, NewInvoice},
+        invoice_item::InvoiceItem,
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         customer::Customer as CustomerModel,
@@ -24,7 +28,7 @@ pub fn create(
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{orders, products};
+    use crate::schema::{orders, payments, products};
 
     //get a database connection for pool
     let conn = &mut get_conn(&pool);
@@ -57,7 +61,7 @@ pub fn create(
 
     //check if payment is done or not
     let payment: PaymentModel = match payments
-        .find(order.get_id())
+        .filter(payments::order_id.eq(order.get_id()))
         .select(PaymentModel::as_select())
         .first(conn)
         .optional()
@@ -214,3 +218,159 @@ pub fn create(
             ),
     }
 }
+
+pub fn get(inv_id: web::Path<(String,)>, pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+    let inv_id: String = inv_id.into_inner().0;
+
+    let inv_uuid: Uuid = match Uuid::parse_str(&inv_id) {
+        Ok(uid) => uid,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid invoice id"}))
+        }
+    };
+
+    let conn = &mut get_conn(&pool);
+
+    use crate::schema::customers::dsl::*;
+    use crate::schema::invoice_items::dsl::*;
+    use crate::schema::invoices::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{invoice_items, invoices, products};
+
+    let invoice: InvoiceModel = match invoices
+        .filter(invoices::uuid.eq(&inv_uuid.to_string()))
+        .select(InvoiceModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Invoice not found"}))
+        }
+        Err(_) => return HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong while searching invoice"}),
+            ),
+    };
+
+    // I think we can simply unwrap these entities.
+    let order: OrderModel = match orders
+        .find(invoice.order_id())
+        .select(OrderModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Order not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let payment: PaymentModel = match payments
+        .find(invoice.order_id())
+        .select(PaymentModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(
+                serde_json::json!({"message": "Payment not done for the order. Please pay first"}),
+            ),
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let customer: CustomerModel = match customers
+        .find(invoice.customer_id())
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Customer not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let inv_items: Vec<InvoiceItem> = match invoice_items
+        .inner_join(invoices)
+        .inner_join(products)
+        .select((
+            invoice_items::uuid,
+            products::uuid,
+            products::name,
+            invoices::uuid,
+            invoice_items::quantity,
+            invoice_items::unit_price,
+            invoice_items::discount_percent,
+            invoice_items::discount_amount,
+            invoice_items::total,
+        ))
+        .load::<InvoiceItem>(conn)
+    {
+        Ok(v) => v,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    let inv_vm: Invoice = Invoice {
+        uuid: invoice.uuid().to_owned(),
+        invoice_number: invoice.invoice_number(),
+        invoice_date: invoice.invoice_date().to_owned(),
+        sub_total: invoice.sub_total(),
+        vat_percent: invoice.vat_percent(),
+        vat_amount: invoice.vat_amount(),
+        net_amount: invoice.net_amount(),
+        order_id: order.get_uuid().to_owned(),
+        customer_id: customer.get_uuid().to_owned(),
+        customer_name: customer.get_name().to_owned(),
+        payment_id: payment.get_uuid().to_owned(),
+        invoice_items: inv_items,
+    };
+
+    HttpResponse::Ok().status(StatusCode::OK).json(inv_vm)
+}
+
+// We have to use some level of authorization here
+pub fn get_all(pool: web::Data<SqliteConnectionPool>) -> impl Resonder {
+    let conn = &mut get_conn(&pool);
+    use crate::schema::invoices::dsl::*;
+    use crate::schema::customers::dsl::*;
+    use crate::schema::products::dsl::*;
+
+    match invoices.inner_join()
+
+}
+
+
+
+

@@ -1,9 +1,13 @@
+use serde::Serialize;
+
 use super::invoice_item::{InvoiceItem, NewInvoiceItem};
 
+#[derive(Serialize)]
 pub struct Invoice {
     pub uuid: String,
     pub invoice_number: i32,
     pub invoice_date: String,
+    pub customer_name: String,
     pub sub_total: f64,
     pub vat_percent: f64,
     pub vat_amount: f64,

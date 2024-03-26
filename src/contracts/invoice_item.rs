@@ -1,9 +1,11 @@
+use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Queryable)]
 pub struct InvoiceItem {
     pub uuid: String,
     pub product_id: String,
+    pub product_name: String,
     pub invoice_id: String,
     pub quantity: f64,
     pub unit_price: f64,
