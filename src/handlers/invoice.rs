@@ -1,10 +1,10 @@
-use actix_web::{http::StatusCode, web, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::{
     contracts::{
-        invoice::{Invoice, NewInvoice},
+        invoice::{Invoice, InvoiceOnly, NewInvoice},
         invoice_item::InvoiceItem,
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -18,7 +18,8 @@ use crate::{
     },
 };
 
-pub fn create(
+#[post("")]
+pub async fn create(
     inv_json: web::Json<NewInvoice>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
@@ -206,9 +207,10 @@ pub fn create(
                                         .json(serde_json::json!({"message": "Ops! something went wrong while inserting invoice item"}))
                         }
                 }
-                HttpResponse::Ok()
-                    .status(StatusCode::OK)
-                    .json(serde_json::json!({"message": "Invoice added successfully"}))
+                let redirect_url = format!("invoices/get/{}", inv.uuid().to_owned());
+                HttpResponse::SeeOther()
+                    .append_header((actix_web::http::header::LOCATION, redirect_url))
+                    .finish()
             }
         }
         Err(_) => HttpResponse::InternalServerError()
@@ -219,7 +221,11 @@ pub fn create(
     }
 }
 
-pub fn get(inv_id: web::Path<(String,)>, pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+#[get("/{inv_id}")]
+pub async fn get(
+    inv_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
     let inv_id: String = inv_id.into_inner().0;
 
     let inv_uuid: Uuid = match Uuid::parse_str(&inv_id) {
@@ -360,17 +366,43 @@ pub fn get(inv_id: web::Path<(String,)>, pool: web::Data<SqliteConnectionPool>) 
     HttpResponse::Ok().status(StatusCode::OK).json(inv_vm)
 }
 
-// We have to use some level of authorization here
-pub fn get_all(pool: web::Data<SqliteConnectionPool>) -> impl Resonder {
+#[get("")]
+pub async fn get_all(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     let conn = &mut get_conn(&pool);
-    use crate::schema::invoices::dsl::*;
     use crate::schema::customers::dsl::*;
-    use crate::schema::products::dsl::*;
+    use crate::schema::invoices::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::{customers, invoices, orders, payments};
 
-    match invoices.inner_join()
-
+    match invoices
+        .inner_join(customers)
+        .inner_join(orders)
+        .inner_join(payments)
+        .select((
+            invoices::uuid,
+            invoice_number,
+            invoice_date,
+            customers::first_name
+                .concat(" ")
+                .concat(customers::last_name),
+            sub_total,
+            vat_percent,
+            vat_amount,
+            net_amount,
+            orders::uuid,
+            customers::uuid,
+            payments::uuid,
+        ))
+        .load::<InvoiceOnly>(conn)
+    {
+        Ok(i) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"invoices": i})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong while fetching invoices"}),
+            ),
+    }
 }
-
-
-
-

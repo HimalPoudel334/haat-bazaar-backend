@@ -32,6 +32,10 @@ impl Customer {
         &self.last_name
     }
 
+    pub fn get_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name)
+    }
+
     pub fn get_phone_number(&self) -> &String {
         &self.phone_number
     }
