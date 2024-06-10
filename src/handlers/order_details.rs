@@ -13,7 +13,7 @@ use crate::{
     },
 };
 
-#[get("")]
+#[get("/{order_uid}")]
 pub async fn get(
     order_uid: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
@@ -81,14 +81,14 @@ pub async fn get(
         ))
         .load::<OrderDetails>(conn)
     {
-        Ok(ods) => HttpResponse::Ok().status(StatusCode::OK).json(ods),
+        Ok(ods) => HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"order-details": ods})),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
 
-#[get("/{od_uuid}")]
+#[get("order-detail/{od_uuid}")]
 pub async fn get_order_detail(
     od_uuid: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
