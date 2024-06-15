@@ -7,6 +7,7 @@ diesel::table! {
         product_id -> Integer,
         customer_id -> Integer,
         quantity -> Double,
+        sku -> Text,
         created_on -> Text,
     }
 }

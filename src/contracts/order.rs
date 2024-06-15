@@ -1,7 +1,7 @@
 use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
-use super::order_details::NewOrderDetail;
+use super::{customer::Customer, order_details::{NewOrderDetail, OrderDetails}};
 
 #[derive(Serialize, Deserialize, Selectable, Queryable)]
 #[diesel(table_name = crate::schema::orders)]
@@ -15,6 +15,21 @@ pub struct Order {
     pub delivery_status: String,
     pub total_price: f64,
     pub customer_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderResponse {
+    #[serde(rename = "id")]
+    pub uuid: String,
+    pub created_on: String,
+    pub fulfilled_on: String,
+    pub delivery_location: String,
+    pub delivery_status: String,
+    pub total_price: f64,
+    #[serde(flatten)]
+    pub customer: Customer,
+    pub order_items: Vec<OrderDetails>
 }
 
 #[derive(Deserialize)]

@@ -14,6 +14,7 @@ pub struct Cart {
     product_id: i32,
     customer_id: i32,
     quantity: f64,
+    sku: String,
     created_on: String,
 }
 
@@ -34,6 +35,9 @@ impl Cart {
     pub fn get_quantity(&self) -> f64 {
         self.quantity
     }
+    pub fn get_sku(&self) -> &str{
+        &self.sku
+    }
     pub fn get_created_on(&self) -> &str {
         &self.created_on
     }
@@ -46,6 +50,7 @@ pub struct NewCartItem {
     product_id: i32,
     customer_id: i32,
     quantity: f64,
+    sku: String,
     created_on: String,
 }
 
@@ -56,6 +61,7 @@ impl NewCartItem {
             customer_id: customer.get_id(),
             product_id: product.get_id(),
             quantity,
+            sku: product.get_unit().to_owned(),
             created_on,
         }
     }

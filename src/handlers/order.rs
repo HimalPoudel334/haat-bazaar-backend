@@ -7,7 +7,7 @@ use crate::{
     contracts::order::{Order, OrderCreate, OrderDeliveryStatus, OrderEdit},
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel, order::NewOrder, order::Order as OrderModel,
+        customer::Customer as CustomerModel, order::NewOrder, order::Order as OrderModel, order_detail::OrderDetail as OrderDetailsModel,
         order_detail::NewOrderDetail as NewOrderDetailModel, product::Product as ProductModel,
     },
 };
@@ -16,7 +16,7 @@ use crate::{
 pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     use crate::schema::customers::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{customers, orders};
+    use crate::schema::{customers, orders, order_details};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);

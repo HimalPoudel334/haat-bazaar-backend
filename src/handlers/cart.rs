@@ -63,6 +63,7 @@ pub async fn get(
             products::uuid,
             products::name,
             carts::quantity,
+            carts::sku,
             carts::created_on,
         ))
         .load::<Cart>(&mut get_conn(&pool))
@@ -173,6 +174,7 @@ pub async fn create(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
+                sku: c.get_sku().to_owned(),
                 created_on: c.get_created_on().to_owned(),
                 product_name: product.get_name().to_owned(),
             };
@@ -270,6 +272,7 @@ pub async fn update_quantity(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
+                sku: c.get_sku().to_owned(),
                 created_on: c.get_created_on().to_owned(),
                 product_name: product.get_name().to_owned(),
             };

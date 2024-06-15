@@ -45,7 +45,10 @@ impl Product {
         self.stock
     }
 
-    //oh lord have mercy
+    pub fn get_unit(&self) -> &str {
+        &self.unit
+    }
+
     //I have created a dependency of this model to contracts which should be avoided
     pub fn as_response(&self, category: &Category) -> crate::contracts::product::Product {
         crate::contracts::product::Product {
