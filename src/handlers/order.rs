@@ -5,8 +5,8 @@ use diesel::prelude::*;
 use crate::{
     base_types::delivery_status::DeliveryStatus,
     contracts::order::{
-        CategoryN, CustomerN, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemsN,
-        OrderN, ProductN,
+        CategoryResponse, CustomerResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
+        OrderItemResponse, OrderResponse, ProductResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -152,69 +152,69 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .load::<OrderTuple>(conn)
         .expect("Error loading orders");
 
-    let mut order_res: Vec<OrderN> = Vec::new();
+    // let mut order_res: Vec<OrderN> = Vec::new();
 
-    for (
-        order_uuid,
-        order_created_on,
-        order_fulfilled_on,
-        order_delivery_location,
-        order_delivery_status,
-        order_total_price,
-        (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
-        (
-            order_item_uuid,
-            order_item_quantity,
-            order_item_price,
-            (
-                product_uuid,
-                product_name,
-                product_description,
-                product_image,
-                product_price,
-                product_unit,
-                (category_uuid, category_name),
-            ),
-        ),
-    ) in orders_vec
-    {
-        let ordn = OrderN {
-            uuid: order_uuid,
-            created_on: order_created_on,
-            fulfilled_on: order_fulfilled_on,
-            delivery_location: order_delivery_location,
-            delivery_status: order_delivery_status,
-            total_price: order_total_price,
-            customer: CustomerN {
-                uuid: customer_uuid,
-                first_name: customer_first_name,
-                last_name: customer_last_name,
-                phone_number: customer_phone_number,
-            },
-            order_items: vec![OrderItemsN {
-                uuid: order_item_uuid,
-                quantity: order_item_quantity,
-                price: order_item_price,
-                product: ProductN {
-                    uuid: product_uuid,
-                    name: product_name,
-                    description: product_description,
-                    image: product_image,
-                    price: product_price,
-                    unit: product_unit,
-                    category: CategoryN {
-                        uuid: category_uuid,
-                        name: category_name,
-                    },
-                },
-            }],
-        };
-        order_res.push(ordn);
-    }
+    // for (
+    //     order_uuid,
+    //     order_created_on,
+    //     order_fulfilled_on,
+    //     order_delivery_location,
+    //     order_delivery_status,
+    //     order_total_price,
+    //     (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+    //     (
+    //         order_item_uuid,
+    //         order_item_quantity,
+    //         order_item_price,
+    //         (
+    //             product_uuid,
+    //             product_name,
+    //             product_description,
+    //             product_image,
+    //             product_price,
+    //             product_unit,
+    //             (category_uuid, category_name),
+    //         ),
+    //     ),
+    // ) in orders_vec
+    // {
+    //     let ordn = OrderN {
+    //         uuid: order_uuid,
+    //         created_on: order_created_on,
+    //         fulfilled_on: order_fulfilled_on,
+    //         delivery_location: order_delivery_location,
+    //         delivery_status: order_delivery_status,
+    //         total_price: order_total_price,
+    //         customer: CustomerResponse {
+    //             uuid: customer_uuid,
+    //             first_name: customer_first_name,
+    //             last_name: customer_last_name,
+    //             phone_number: customer_phone_number,
+    //         },
+    //         order_items: vec![OrderItemResponse {
+    //             uuid: order_item_uuid,
+    //             quantity: order_item_quantity,
+    //             price: order_item_price,
+    //             product: ProductResponse {
+    //                 uuid: product_uuid,
+    //                 name: product_name,
+    //                 description: product_description,
+    //                 image: product_image,
+    //                 price: product_price,
+    //                 unit: product_unit,
+    //                 category: CategoryN {
+    //                     uuid: category_uuid,
+    //                     name: category_name,
+    //                 },
+    //             },
+    //         }],
+    //     };
+    //     order_res.push(ordn);
+    // }
 
     // Map the results to OrderN
-    //calling into_iter() moves the values so i used for loop
-    /*orders_vec
+
+    let orders_vec = &orders_vec
         .into_iter()
         .map(
             |(
@@ -240,31 +240,31 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                     ),
                 ),
             )| {
-                OrderN {
+                OrderResponse {
                     uuid: order_uuid,
                     created_on: order_created_on,
                     fulfilled_on: order_fulfilled_on,
                     delivery_location: order_delivery_location,
                     delivery_status: order_delivery_status,
                     total_price: order_total_price,
-                    customer: CustomerN {
+                    customer: CustomerResponse {
                         uuid: customer_uuid,
                         first_name: customer_first_name,
                         last_name: customer_last_name,
                         phone_number: customer_phone_number,
                     },
-                    order_items: vec![OrderItemsN {
+                    order_items: vec![OrderItemResponse {
                         uuid: order_item_uuid,
                         quantity: order_item_quantity,
                         price: order_item_price,
-                        product: ProductN {
+                        product: ProductResponse {
                             uuid: product_uuid,
                             name: product_name,
                             description: product_description,
                             image: product_image,
                             price: product_price,
                             unit: product_unit,
-                            category: CategoryN {
+                            category: CategoryResponse {
                                 uuid: category_uuid,
                                 name: category_name,
                             },
@@ -273,11 +273,11 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 }
             },
         )
-        .collect::<Vec<OrderN>>();
-    */
+        .collect::<Vec<OrderResponse>>();
+
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"orders": order_res}))
+        .json(serde_json::json!({"orders": orders_vec}))
 }
 
 #[get("/{order_id}")]

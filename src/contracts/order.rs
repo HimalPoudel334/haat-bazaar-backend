@@ -1,10 +1,7 @@
 use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
-use super::{
-    customer::Customer,
-    order_details::{NewOrderDetail, OrderDetails},
-};
+use super::order_details::NewOrderDetail;
 
 #[derive(Serialize, Deserialize, Selectable, Queryable)]
 #[diesel(table_name = crate::schema::orders)]
@@ -20,22 +17,10 @@ pub struct Order {
     pub customer_id: String,
 }
 
-#[derive(Serialize)]
+/* Order response */
+#[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderResponse {
-    #[serde(flatten)]
-    pub order: Order,
-    pub customer: Customer,
-    pub order_items: Vec<OrderDetails>,
-}
-
-#[derive(Serialize)]
-pub struct OR {
-    pub orders: OrderN,
-}
-
-#[derive(Serialize, Queryable)]
-pub struct OrderN {
     #[serde(rename = "id")]
     pub uuid: String,
     pub created_on: String,
@@ -43,12 +28,13 @@ pub struct OrderN {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
-    pub customer: CustomerN,
-    pub order_items: Vec<OrderItemsN>,
+    pub customer: CustomerResponse,
+    pub order_items: Vec<OrderItemResponse>,
 }
 
 #[derive(Serialize, Queryable)]
-pub struct CustomerN {
+#[serde(rename_all = "camelCase")]
+pub struct CustomerResponse {
     #[serde(rename = "id")]
     pub uuid: String,
     pub first_name: String,
@@ -57,16 +43,16 @@ pub struct CustomerN {
 }
 
 #[derive(Serialize, Queryable)]
-pub struct OrderItemsN {
+pub struct OrderItemResponse {
     #[serde(rename = "id")]
     pub uuid: String,
-    pub product: ProductN,
+    pub product: ProductResponse,
     pub quantity: f64,
     pub price: f64,
 }
 
 #[derive(Serialize, Queryable)]
-pub struct ProductN {
+pub struct ProductResponse {
     #[serde(rename = "id")]
     pub uuid: String,
     pub name: String,
@@ -74,14 +60,15 @@ pub struct ProductN {
     pub image: String,
     pub price: f64,
     pub unit: String,
-    pub category: CategoryN,
+    pub category: CategoryResponse,
 }
 
 #[derive(Serialize, Queryable)]
-pub struct CategoryN {
+pub struct CategoryResponse {
     pub uuid: String,
     pub name: String,
 }
+/* End */
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
