@@ -4,47 +4,280 @@ use diesel::prelude::*;
 
 use crate::{
     base_types::delivery_status::DeliveryStatus,
-    contracts::order::{Order, OrderCreate, OrderDeliveryStatus, OrderEdit},
+    contracts::order::{
+        CategoryN, CustomerN, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemsN,
+        OrderN, ProductN,
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel, order::NewOrder, order::Order as OrderModel, order_detail::OrderDetail as OrderDetailsModel,
-        order_detail::NewOrderDetail as NewOrderDetailModel, product::Product as ProductModel,
+        customer::Customer as CustomerModel,
+        order::{NewOrder, Order as OrderModel},
+        order_detail::NewOrderDetail as NewOrderDetailModel,
+        product::Product as ProductModel,
     },
 };
 
 #[get("")]
 pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+    use crate::schema::categories::dsl::*;
     use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{customers, orders, order_details};
+    use crate::schema::products::dsl::*;
+    use crate::schema::{categories, customers, order_details, orders, products};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let orders_vec: Vec<Order> = match orders
-        .inner_join(customers)
+    // let all_orders = orders.inner_join(order_details.inner_join(products)).inner_join(customers).select((OrderDetailsModel::as_select(), CustomerModel::as_select(), OrderModel::as_select())).load::<(OrderDetailsModel, CustomerModel, OrderModel)>(conn).unwrap();
+    // println!("order-orderItems pairs: {all_orders:?}");
+
+    // let orders_vec: Vec<Order> = match orders
+    //     .inner_join(customers)
+    //     .select((
+    //         orders::uuid,
+    //         created_on,
+    //         fulfilled_on,
+    //         delivery_location,
+    //         delivery_status,
+    //         total_price,
+    //         customers::uuid,
+    //     ))
+    //     .load::<Order>(conn)
+    // {
+    //     Ok(o) => o,
+    //     Err(_) => {
+    //         return HttpResponse::InternalServerError()
+    //             .status(StatusCode::INTERNAL_SERVER_ERROR)
+    //             .json(serde_json::json!({"message": "Ops! something went wrong"}));
+    //     }
+    // };
+
+    // let orders_vec: Vec<crate::contracts::order::OrderN> = match orders
+    //     .inner_join(customers)
+    //     .inner_join(order_details.inner_join(products.inner_join(categories)))
+    //     .select((
+    //         orders::uuid,
+    //         created_on,
+    //         fulfilled_on,
+    //         delivery_location,
+    //         delivery_status,
+    //         total_price,
+    //         (
+    //             customers::uuid,
+    //             customers::first_name,
+    //             customers::last_name,
+    //             customers::phone_number,
+    //         ),
+    //         (
+    //             order_details::uuid,
+    //             order_details::quantity,
+    //             order_details::price,
+    //             (
+    //                 products::uuid,
+    //                 products::name,
+    //                 products::description,
+    //                 products::image,
+    //                 (categories::uuid, categories::name),
+    //             ),
+    //         ),
+    //     ))
+    //     .load::<crate::contracts::order::OrderN>(conn)
+    // {
+    //     Ok(o) => o,
+    //     Err(_) => {
+    //         return HttpResponse::InternalServerError()
+    //             .status(StatusCode::INTERNAL_SERVER_ERROR)
+    //             .json(serde_json::json!({"message": "Ops! something went wrong"}));
+    //     }
+    // };
+
+    type OrderTuple = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        f64,
+        (String, String, String, String),
+        (
+            String,
+            f64,
+            f64,
+            (
+                String,
+                String,
+                String,
+                String,
+                f64,
+                String,
+                (String, String),
+            ),
+        ),
+    );
+
+    let orders_vec = orders
+        .inner_join(customers.on(customer_id.eq(customers::id)))
+        .inner_join(order_details.on(order_id.eq(orders::id)))
+        .inner_join(products.on(order_details::product_id.eq(products::id)))
+        .inner_join(categories.on(products::category_id.eq(categories::id)))
         .select((
             orders::uuid,
-            created_on,
-            fulfilled_on,
-            delivery_location,
-            delivery_status,
-            total_price,
-            customers::uuid,
+            orders::created_on,
+            orders::fulfilled_on,
+            orders::delivery_location,
+            orders::delivery_status,
+            orders::total_price,
+            (
+                customers::uuid,
+                customers::first_name,
+                customers::last_name,
+                customers::phone_number,
+            ),
+            (
+                order_details::uuid,
+                order_details::quantity,
+                order_details::price,
+                (
+                    products::uuid,
+                    products::name,
+                    products::description,
+                    products::image,
+                    products::price,
+                    products::unit,
+                    (categories::uuid, categories::name),
+                ),
+            ),
         ))
-        .load::<Order>(conn)
-    {
-        Ok(o) => o,
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}));
-        }
-    };
+        .load::<OrderTuple>(conn)
+        .expect("Error loading orders");
 
+    let mut order_res: Vec<OrderN> = Vec::new();
+
+    for (
+        order_uuid,
+        order_created_on,
+        order_fulfilled_on,
+        order_delivery_location,
+        order_delivery_status,
+        order_total_price,
+        (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+        (
+            order_item_uuid,
+            order_item_quantity,
+            order_item_price,
+            (
+                product_uuid,
+                product_name,
+                product_description,
+                product_image,
+                product_price,
+                product_unit,
+                (category_uuid, category_name),
+            ),
+        ),
+    ) in orders_vec
+    {
+        let ordn = OrderN {
+            uuid: order_uuid,
+            created_on: order_created_on,
+            fulfilled_on: order_fulfilled_on,
+            delivery_location: order_delivery_location,
+            delivery_status: order_delivery_status,
+            total_price: order_total_price,
+            customer: CustomerN {
+                uuid: customer_uuid,
+                first_name: customer_first_name,
+                last_name: customer_last_name,
+                phone_number: customer_phone_number,
+            },
+            order_items: vec![OrderItemsN {
+                uuid: order_item_uuid,
+                quantity: order_item_quantity,
+                price: order_item_price,
+                product: ProductN {
+                    uuid: product_uuid,
+                    name: product_name,
+                    description: product_description,
+                    image: product_image,
+                    price: product_price,
+                    unit: product_unit,
+                    category: CategoryN {
+                        uuid: category_uuid,
+                        name: category_name,
+                    },
+                },
+            }],
+        };
+        order_res.push(ordn);
+    }
+
+    // Map the results to OrderN
+    //calling into_iter() moves the values so i used for loop
+    /*orders_vec
+        .into_iter()
+        .map(
+            |(
+                order_uuid,
+                order_created_on,
+                order_fulfilled_on,
+                order_delivery_location,
+                order_delivery_status,
+                order_total_price,
+                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+                (
+                    order_item_uuid,
+                    order_item_quantity,
+                    order_item_price,
+                    (
+                        product_uuid,
+                        product_name,
+                        product_description,
+                        product_image,
+                        product_price,
+                        product_unit,
+                        (category_uuid, category_name),
+                    ),
+                ),
+            )| {
+                OrderN {
+                    uuid: order_uuid,
+                    created_on: order_created_on,
+                    fulfilled_on: order_fulfilled_on,
+                    delivery_location: order_delivery_location,
+                    delivery_status: order_delivery_status,
+                    total_price: order_total_price,
+                    customer: CustomerN {
+                        uuid: customer_uuid,
+                        first_name: customer_first_name,
+                        last_name: customer_last_name,
+                        phone_number: customer_phone_number,
+                    },
+                    order_items: vec![OrderItemsN {
+                        uuid: order_item_uuid,
+                        quantity: order_item_quantity,
+                        price: order_item_price,
+                        product: ProductN {
+                            uuid: product_uuid,
+                            name: product_name,
+                            description: product_description,
+                            image: product_image,
+                            price: product_price,
+                            unit: product_unit,
+                            category: CategoryN {
+                                uuid: category_uuid,
+                                name: category_name,
+                            },
+                        },
+                    }],
+                }
+            },
+        )
+        .collect::<Vec<OrderN>>();
+    */
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"orders": orders_vec}))
+        .json(serde_json::json!({"orders": order_res}))
 }
 
 #[get("/{order_id}")]

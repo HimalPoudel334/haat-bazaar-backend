@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 
 use super::product::Product;
 
-#[derive(Serialize)]
+#[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
-#[derive(Queryable)]
 pub struct OrderDetails {
     #[serde(rename = "id")]
     pub uuid: String,
