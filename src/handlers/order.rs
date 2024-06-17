@@ -1,12 +1,11 @@
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
-use diesel::prelude::*;
+use diesel::{prelude::*, sqlite::Sqlite};
 
 use crate::{
     base_types::delivery_status::DeliveryStatus,
     contracts::order::{
-        CategoryResponse, CustomerResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
-        OrderItemResponse, OrderResponse, ProductResponse,
+        CategoryResponse, CustomerOrderResponse, CustomerResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -19,78 +18,15 @@ use crate::{
 
 #[get("")]
 pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     use crate::schema::categories::dsl::*;
     use crate::schema::customers::dsl::*;
     use crate::schema::order_details::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
     use crate::schema::{categories, customers, order_details, orders, products};
-
-    //get a pooled connection from db
-    let conn = &mut get_conn(&pool);
-
-    // let all_orders = orders.inner_join(order_details.inner_join(products)).inner_join(customers).select((OrderDetailsModel::as_select(), CustomerModel::as_select(), OrderModel::as_select())).load::<(OrderDetailsModel, CustomerModel, OrderModel)>(conn).unwrap();
-    // println!("order-orderItems pairs: {all_orders:?}");
-
-    // let orders_vec: Vec<Order> = match orders
-    //     .inner_join(customers)
-    //     .select((
-    //         orders::uuid,
-    //         created_on,
-    //         fulfilled_on,
-    //         delivery_location,
-    //         delivery_status,
-    //         total_price,
-    //         customers::uuid,
-    //     ))
-    //     .load::<Order>(conn)
-    // {
-    //     Ok(o) => o,
-    //     Err(_) => {
-    //         return HttpResponse::InternalServerError()
-    //             .status(StatusCode::INTERNAL_SERVER_ERROR)
-    //             .json(serde_json::json!({"message": "Ops! something went wrong"}));
-    //     }
-    // };
-
-    // let orders_vec: Vec<crate::contracts::order::OrderN> = match orders
-    //     .inner_join(customers)
-    //     .inner_join(order_details.inner_join(products.inner_join(categories)))
-    //     .select((
-    //         orders::uuid,
-    //         created_on,
-    //         fulfilled_on,
-    //         delivery_location,
-    //         delivery_status,
-    //         total_price,
-    //         (
-    //             customers::uuid,
-    //             customers::first_name,
-    //             customers::last_name,
-    //             customers::phone_number,
-    //         ),
-    //         (
-    //             order_details::uuid,
-    //             order_details::quantity,
-    //             order_details::price,
-    //             (
-    //                 products::uuid,
-    //                 products::name,
-    //                 products::description,
-    //                 products::image,
-    //                 (categories::uuid, categories::name),
-    //             ),
-    //         ),
-    //     ))
-    //     .load::<crate::contracts::order::OrderN>(conn)
-    // {
-    //     Ok(o) => o,
-    //     Err(_) => {
-    //         return HttpResponse::InternalServerError()
-    //             .status(StatusCode::INTERNAL_SERVER_ERROR)
-    //             .json(serde_json::json!({"message": "Ops! something went wrong"}));
-    //     }
-    // };
 
     type OrderTuple = (
         String,
@@ -153,7 +89,6 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .expect("Error loading orders");
 
     // let mut order_res: Vec<OrderN> = Vec::new();
-
     // for (
     //     order_uuid,
     //     order_created_on,
@@ -213,8 +148,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     // }
 
     // Map the results to OrderN
-
-    let orders_vec = &orders_vec
+    let orders_vec: Vec<OrderResponse> = orders_vec
         .into_iter()
         .map(
             |(
@@ -280,15 +214,15 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .json(serde_json::json!({"orders": orders_vec}))
 }
 
-#[get("/{order_id}")]
+#[get("/{ord_id}")]
 pub async fn get_order(
-    order_id: web::Path<(String,)>,
+    ord_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    let order_id: String = order_id.into_inner().0;
+    let ord_id: String = ord_id.into_inner().0;
 
     //check if the order id is a valid uuid
-    let order_id: Uuid = match Uuid::parse_str(&order_id) {
+    let ord_id: Uuid = match Uuid::parse_str(&ord_id) {
         Ok(o) => o,
         Err(_) => {
             return HttpResponse::BadRequest()
@@ -297,29 +231,134 @@ pub async fn get_order(
         }
     };
 
+    use crate::schema::categories::dsl::*;
     use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{customers, orders};
+    use crate::schema::products::dsl::*;
+    use crate::schema::{categories, customers, order_details, orders, products};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
+    type OrderTuple = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        f64,
+        (String, String, String, String),
+        (
+            String,
+            f64,
+            f64,
+            (
+                String,
+                String,
+                String,
+                String,
+                f64,
+                String,
+                (String, String),
+            ),
+        ),
+    );
+
     match orders
-        .inner_join(customers)
-        .filter(orders::uuid.eq(&order_id.to_string()))
+        .inner_join(customers.on(customer_id.eq(customers::id)))
+        .inner_join(order_details.on(order_id.eq(orders::id)))
+        .inner_join(products.on(order_details::product_id.eq(products::id)))
+        .inner_join(categories.on(products::category_id.eq(categories::id)))
+        .filter(orders::uuid.eq(&ord_id.to_string()))
         .select((
             orders::uuid,
-            created_on,
-            fulfilled_on,
-            delivery_location,
-            delivery_status,
-            total_price,
-            customers::uuid,
+            orders::created_on,
+            orders::fulfilled_on,
+            orders::delivery_location,
+            orders::delivery_status,
+            orders::total_price,
+            (
+                customers::uuid,
+                customers::first_name,
+                customers::last_name,
+                customers::phone_number,
+            ),
+            (
+                order_details::uuid,
+                order_details::quantity,
+                order_details::price,
+                (
+                    products::uuid,
+                    products::name,
+                    products::description,
+                    products::image,
+                    products::price,
+                    products::unit,
+                    (categories::uuid, categories::name),
+                ),
+            ),
         ))
-        .first::<Order>(conn)
+        .first::<OrderTuple>(conn)
         .optional()
     {
-        Ok(Some(o)) => HttpResponse::Ok().status(StatusCode::OK).json(o),
+        Ok(Some(o)) => {
+            let (
+                order_uuid,
+                order_created_on,
+                order_fulfilled_on,
+                order_delivery_location,
+                order_delivery_status,
+                order_total_price,
+                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+                (
+                    order_item_uuid,
+                    order_item_quantity,
+                    order_item_price,
+                    (
+                        product_uuid,
+                        product_name,
+                        product_description,
+                        product_image,
+                        product_price,
+                        product_unit,
+                        (category_uuid, category_name),
+                    ),
+                ),
+            ) = o;
+            let ord_res: OrderResponse = OrderResponse {
+                uuid: order_uuid,
+                created_on: order_created_on,
+                fulfilled_on: order_fulfilled_on,
+                delivery_location: order_delivery_location,
+                delivery_status: order_delivery_status,
+                total_price: order_total_price,
+                customer: CustomerResponse {
+                    uuid: customer_uuid,
+                    first_name: customer_first_name,
+                    last_name: customer_last_name,
+                    phone_number: customer_phone_number,
+                },
+                order_items: vec![OrderItemResponse {
+                    uuid: order_item_uuid,
+                    quantity: order_item_quantity,
+                    price: order_item_price,
+                    product: ProductResponse {
+                        uuid: product_uuid,
+                        name: product_name,
+                        description: product_description,
+                        image: product_image,
+                        price: product_price,
+                        unit: product_unit,
+                        category: CategoryResponse {
+                            uuid: category_uuid,
+                            name: category_name,
+                        },
+                    },
+                }],
+            };
+            HttpResponse::Ok().status(StatusCode::OK).json(ord_res)
+        }
         Ok(None) => HttpResponse::NotFound()
             .status(StatusCode::NOT_FOUND)
             .json(serde_json::json!({"message": "Order not found"})),
@@ -328,6 +367,174 @@ pub async fn get_order(
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
+
+#[get("/customer/{cust_id}")]
+pub async fn get_customer_orders(cust_id: web::Path<(String,)>, pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+    let cust_id: String = cust_id.into_inner().0;
+
+    //first validate the customer exists or not
+    //before that lets check whether the provided customer id is a valid guid or not
+    let cust_id: Uuid = match Uuid::parse_str(&cust_id) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid customer id"}));
+        }
+    };
+
+    use crate::schema::categories::dsl::*;
+    use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{categories, customers, order_details, orders, products};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    //find the customer for the provided customer id
+    let cust: CustomerModel = match customers
+        .filter(customers::uuid.eq(cust_id.to_string()))
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Customer not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    type OrderTuple = (
+        String,
+        String,
+        String,
+        String,
+        String,
+        f64,
+        (
+            String,
+            f64,
+            f64,
+            (
+                String,
+                String,
+                String,
+                String,
+                f64,
+                String,
+                (String, String),
+            ),
+        ),
+    );
+
+    match OrderModel::belonging_to(&cust)
+            .inner_join(order_details.on(order_id.eq(orders::id)))
+            .inner_join(products.on(order_details::product_id.eq(products::id)))
+            .inner_join(categories.on(products::category_id.eq(categories::id)))
+            .select((
+                orders::uuid,
+                orders::created_on,
+                orders::fulfilled_on,
+                orders::delivery_location,
+                orders::delivery_status,
+                orders::total_price,
+                (
+                    order_details::uuid,
+                    order_details::quantity,
+                    order_details::price,
+                    (
+                        products::uuid,
+                        products::name,
+                        products::description,
+                        products::image,
+                        products::price,
+                        products::unit,
+                        (categories::uuid, categories::name),
+                    ),
+                ),
+            ))
+            .load::<OrderTuple>(conn)
+            .optional() {
+                Ok(Some(ords)) => {
+                    let customer_orders: Vec<CustomerOrderResponse> = ords.into_iter().map(
+                        |(
+                            order_uuid,
+                            order_created_on,
+                            order_fulfilled_on,
+                            order_delivery_location,
+                            order_delivery_status,
+                            order_total_price,
+                            (
+                                order_item_uuid,
+                                order_item_quantity,
+                                order_item_price,
+                                (
+                                    product_uuid,
+                                    product_name,
+                                    product_description,
+                                    product_image,
+                                    product_price,
+                                    product_unit,
+                                    (category_uuid, category_name),
+                                ),
+                            ),
+                        )| {
+                            CustomerOrderResponse {
+                                uuid: order_uuid,
+                                created_on: order_created_on,
+                                fulfilled_on: order_fulfilled_on,
+                                delivery_location: order_delivery_location,
+                                delivery_status: order_delivery_status,
+                                total_price: order_total_price,
+                                order_items: vec![OrderItemResponse {
+                                    uuid: order_item_uuid,
+                                    quantity: order_item_quantity,
+                                    price: order_item_price,
+                                    product: ProductResponse {
+                                        uuid: product_uuid,
+                                        name: product_name,
+                                        description: product_description,
+                                        image: product_image,
+                                        price: product_price,
+                                        unit: product_unit,
+                                        category: CategoryResponse {
+                                            uuid: category_uuid,
+                                            name: category_name,
+                                        },
+                                    },
+                                }],
+                            }
+                        },
+                    )
+                    .collect::<Vec<CustomerOrderResponse>>();
+                HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"orders": customer_orders}))
+            
+                },
+                    Ok(None) => {
+                        return HttpResponse::NotFound()
+                            .status(StatusCode::NOT_FOUND)
+                            .json(serde_json::json!({"message": "Order not found. Looks customer hasn't ordered anything yet"}))
+                    }
+                    Err(_) => {
+                        return HttpResponse::InternalServerError()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
+                    }
+            }
+
+    
+
+}
+
+
 #[post("")]
 pub async fn create(
     order_json: web::Json<OrderCreate>,
@@ -454,6 +661,7 @@ pub async fn create(
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
+
 
 #[put("/{order_id}")]
 pub async fn edit(

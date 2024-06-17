@@ -33,7 +33,9 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/orders")
             .service(order::create)
             .service(order::edit)
+            .service(order::get_order)
             .service(order::get_orders)
+            .service(order::get_customer_orders)
             .service(order::update_delivery_status),
     )
     .service(

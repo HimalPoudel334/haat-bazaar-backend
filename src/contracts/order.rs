@@ -70,6 +70,19 @@ pub struct CategoryResponse {
 }
 /* End */
 
+#[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerOrderResponse {
+    #[serde(rename = "id")]
+    pub uuid: String,
+    pub created_on: String,
+    pub fulfilled_on: String,
+    pub delivery_location: String,
+    pub delivery_status: String,
+    pub total_price: f64,
+    pub order_items: Vec<OrderItemResponse>,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderCreate {
