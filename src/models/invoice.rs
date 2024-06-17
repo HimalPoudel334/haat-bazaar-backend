@@ -62,6 +62,10 @@ impl Invoice {
     pub fn order_id(&self) -> i32 {
         self.order_id
     }
+
+    pub fn payment_id(&self) -> i32 {
+        self.payment_id
+    }
 }
 
 #[derive(Insertable)]

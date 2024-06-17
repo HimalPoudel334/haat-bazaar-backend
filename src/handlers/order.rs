@@ -1,6 +1,6 @@
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
-use diesel::{prelude::*, sqlite::Sqlite};
+use diesel::prelude::*;
 
 use crate::{
     base_types::delivery_status::DeliveryStatus,

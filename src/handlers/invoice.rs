@@ -191,23 +191,13 @@ pub async fn create(
                         .values(&inv_item_model)
                         .execute(conn)
                         {
-                            Ok(_) => {
-                                match diesel::update(&prod)
-                                    .set(stock.eq(stock - inv_item.quantity))
-                                    .execute(conn)
-                                {
-                                    Ok(_) => {}
-                                    Err(_) => return HttpResponse::InternalServerError()
-                                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                        .json(serde_json::json!({"message": "Ops! something went wrong while updating product"})),
-                                }
-                            }
+                            Ok(_) => {},
                             Err(_) => return HttpResponse::InternalServerError()
                                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                                         .json(serde_json::json!({"message": "Ops! something went wrong while inserting invoice item"}))
                         }
                 }
-                let redirect_url = format!("invoices/get/{}", inv.uuid().to_owned());
+                let redirect_url: String = format!("invoices/get/{}", inv.uuid().to_owned());
                 HttpResponse::SeeOther()
                     .append_header((actix_web::http::header::LOCATION, redirect_url))
                     .finish()
