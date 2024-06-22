@@ -7,3 +7,4 @@ pub mod order;
 pub mod order_details;
 pub mod payment;
 pub mod product;
+pub mod product_images;

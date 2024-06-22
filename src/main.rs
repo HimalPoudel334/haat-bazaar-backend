@@ -1,3 +1,4 @@
+use actix_files as fs;
 use actix_web::{web::Data, App, HttpServer};
 use dotenvy::dotenv;
 
@@ -34,6 +35,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(Data::new(app_config.clone()))
             .app_data(Data::new(db_pool.clone()))
             .configure(routes::app_routes)
+            .service(fs::Files::new("/images", "./images"))
     })
     .bind(("0.0.0.0", 8080))?
     .run()

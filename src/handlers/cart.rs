@@ -178,7 +178,9 @@ pub async fn create(
                 created_on: c.get_created_on().to_owned(),
                 product_name: product.get_name().to_owned(),
             };
-            HttpResponse::Ok().status(StatusCode::OK).json(cart_vm)
+            HttpResponse::Ok()
+                .status(StatusCode::OK)
+                .json(serde_json::json!({"cart": cart_vm}))
         }
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)

@@ -3,7 +3,8 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
-use crate::models::product_image::NewProductImage;
+use crate::contracts::product_images::ProductImage;
+use crate::models::product_image::{NewProductImage, ProductImage as ProductImageModel};
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
@@ -428,7 +429,7 @@ pub async fn upload_product_images(
     println!("Server got {} images", form.images.len());
     for img in form.images {
         let path = format!(
-            "{}product_{}_extra.png",
+            "{}image_{}_extra.png",
             app_config.product_extraimages_path,
             Uuid::new_v4().to_string()
         );
@@ -453,4 +454,70 @@ pub async fn upload_product_images(
     }
 
     HttpResponse::Ok().json(serde_json::json!({"message": "Upload successful"}))
+}
+
+#[get("/{prod_id}/images")]
+pub async fn get_product_images_list(
+    prod_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_id: String = prod_id.into_inner().0;
+
+    //check if the product_id is valid uuid or not before trip to db
+    let prod_uuid: Uuid = match Uuid::parse_str(&prod_id) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+
+    use crate::schema::products::dsl::*;
+    use crate::schema::{product_images, products};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    //get the product for the uuid
+    let product: ProductModel = match products
+        .filter(products::uuid.eq(&prod_uuid.to_string()))
+        .select(ProductModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    let prod_images: Vec<ProductImage> = match ProductImageModel::belonging_to(&product)
+        .select((product_images::uuid, product_images::image_name))
+        .load::<ProductImage>(conn)
+        .optional()
+    {
+        Ok(Some(pi)) => pi,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product image not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(serde_json::json!({"product_images": prod_images}))
 }
