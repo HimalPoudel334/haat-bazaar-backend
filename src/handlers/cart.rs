@@ -63,8 +63,12 @@ pub async fn get(
             products::uuid,
             products::name,
             carts::quantity,
+            (carts::quantity * products::price),
             carts::sku,
+            products::image,
             carts::created_on,
+            products::stock,
+            products::unit_change,
         ))
         .load::<Cart>(&mut get_conn(&pool))
         .optional()
@@ -174,9 +178,13 @@ pub async fn create(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
+                price: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
+                image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
                 product_name: product.get_name().to_owned(),
+                product_stock: product.get_stock(),
+                product_unit_change: product.get_unit_change(),
             };
             HttpResponse::Ok()
                 .status(StatusCode::OK)
@@ -274,9 +282,13 @@ pub async fn update_quantity(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
+                price: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
+                image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
                 product_name: product.get_name().to_owned(),
+                product_stock: product.get_stock(),
+                product_unit_change: product.get_unit_change(),
             };
             HttpResponse::Ok().status(StatusCode::OK).json(cart_vm)
         }

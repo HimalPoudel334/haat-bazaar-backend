@@ -141,7 +141,7 @@ pub async fn get_product(
                     categories.find(p.get_category_id()).first(conn).unwrap();
                 HttpResponse::Ok()
                     .status(StatusCode::OK)
-                    .json(p.as_response(&category))
+                    .json(serde_json::json!({"product": p.as_response(&category)}))
             }
             None => HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
@@ -519,5 +519,5 @@ pub async fn get_product_images_list(
 
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"product_images": prod_images}))
+        .json(serde_json::json!({"productImages": prod_images}))
 }

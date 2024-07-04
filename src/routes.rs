@@ -19,6 +19,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(product::get_product)
             .service(product::edit)
             .service(product::upload_product_images)
+            .service(product::get_product_images_list)
             .service(product::delete),
     )
     .service(

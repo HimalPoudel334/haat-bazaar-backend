@@ -37,6 +37,10 @@ impl Product {
         &self.name
     }
 
+    pub fn get_image(&self) -> &str {
+        &self.image
+    }
+
     pub fn get_price(&self) -> f64 {
         self.price
     }
@@ -47,6 +51,10 @@ impl Product {
 
     pub fn get_unit(&self) -> &str {
         &self.unit
+    }
+
+    pub fn get_unit_change(&self) -> f64 {
+        self.unit_change
     }
 
     //I have created a dependency of this model to contracts which should be avoided
