@@ -1,6 +1,5 @@
-use actix_web::{get, http::StatusCode, patch, post, web, HttpResponse, Responder};
+use actix_web::{delete, get, http::StatusCode, patch, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
-use diesel::SelectableHelper;
 use uuid::Uuid;
 
 use crate::contracts::cart::{Cart, NewCart, UpdateCartQuantity};
@@ -63,6 +62,7 @@ pub async fn get(
             products::uuid,
             products::name,
             carts::quantity,
+            products::price,
             (carts::quantity * products::price),
             carts::sku,
             products::image,
@@ -178,7 +178,8 @@ pub async fn create(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
-                price: c.get_quantity() * product.get_price(),
+                rate: product.get_price(),
+                total: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
                 image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
@@ -282,7 +283,8 @@ pub async fn update_quantity(
                 uuid: c.get_uuid().to_owned(),
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
-                price: c.get_quantity() * product.get_price(),
+                rate: product.get_price(),
+                total: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
                 image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
@@ -297,5 +299,117 @@ pub async fn update_quantity(
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .json(serde_json::json!({"message": "Ops! something went wrong"}))
         }
+    }
+}
+
+#[delete("/{cart_id}")]
+pub async fn delete_cart(
+    cart_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let cart_id: String = cart_id.into_inner().0;
+
+    //check if the customer id is valid uuid or not
+    let cart_id: Uuid = match Uuid::parse_str(&cart_id) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid cart id"}))
+        }
+    };
+
+    use crate::schema::carts;
+    use crate::schema::carts::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
+    let cart: CartModel = match carts
+        .filter(carts::uuid.eq(&cart_id.to_string()))
+        .select(CartModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Cart not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    match diesel::delete(&cart).execute(conn).optional() {
+        Ok(_) => HttpResponse::NoContent()
+            .status(StatusCode::NO_CONTENT)
+            .finish(),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
+#[delete("/delete-carts/{cust_id}")]
+pub async fn delete_customer_cart(
+    cust_id: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let cust_id: String = cust_id.into_inner().0;
+
+    //check if the customer id is valid uuid or not
+    let cust_id: Uuid = match Uuid::parse_str(&cust_id) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid customer id"}))
+        }
+    };
+
+    //check if customer exists or not
+    //maybe not needed
+
+    use crate::schema::customers;
+    use crate::schema::customers::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
+    let customer: CustomerModel = match customers
+        .filter(customers::uuid.eq(&cust_id.to_string()))
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Customer not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    match diesel::delete(CartModel::belonging_to(&customer))
+        .execute(conn)
+        .optional()
+    {
+        Ok(Some(c)) => HttpResponse::NoContent()
+            .status(StatusCode::NO_CONTENT)
+            .json(c),
+        Ok(None) => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Customer not found"})),
+
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }

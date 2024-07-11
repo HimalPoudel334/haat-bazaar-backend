@@ -53,13 +53,13 @@ pub struct NewOrderDetail {
 }
 
 impl NewOrderDetail {
-    pub fn new(quantity: f64, price: f64, product: &Product, order: &Order) -> Self {
+    pub fn new(quantity: f64, product: &Product, order: &Order) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
             quantity,
             product_id: product.get_id(),
             order_id: order.get_id(),
-            price,
+            price: quantity * product.get_price(),
         }
     }
 }

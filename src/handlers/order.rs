@@ -1,19 +1,21 @@
+use std::fmt::Display;
+
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
-use diesel::prelude::*;
+use diesel::{prelude::*, result::DatabaseErrorInformation};
 
 use crate::{
     base_types::delivery_status::DeliveryStatus,
-    contracts::order::{
-        CategoryResponse, CustomerOrderResponse, CustomerResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse
-    },
-    db::connection::{get_conn, SqliteConnectionPool},
+    contracts::{order::{
+        self, CategoryResponse, CustomerOrderResponse, CustomerResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse
+    }, order_details::NewOrderDetail, product::Product},
+    db::connection::{get_conn, PooledSqliteConnection, SqliteConnectionPool},
     models::{
         customer::Customer as CustomerModel,
         order::{NewOrder, Order as OrderModel},
         order_detail::NewOrderDetail as NewOrderDetailModel,
         product::Product as ProductModel,
-    },
+    }, utils::{self, uuid_validator::DatabaseErrorInfo},
 };
 
 #[get("")]
@@ -540,6 +542,112 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
+    // Validate the customer UUID
+    let customer_uuid = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+        Ok(uid) => uid,
+        Err(e) => return e
+    };
+
+    use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{customers, products};
+
+    // Get a pooled connection from the database
+    let conn = &mut get_conn(&pool);
+
+    // Validate customer existence
+    let mut order_total: f64 = 0.0;
+    (&order_json.order_details).into_iter().for_each(|od| {
+        order_total += od.price;
+    });
+
+    if order_total != order_json.total_price - 100.0 { //the 100 is delivery charge which is hard coded for now.
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
+    }
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    let customer: CustomerModel = match customers
+        .filter(customers::uuid.eq(customer_uuid.to_string()))
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Customer not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    // Create a new order
+    let new_order = NewOrder::new(
+        &customer,
+        order_json.created_on.to_owned(),
+        order_json.total_price.to_owned(),
+        DeliveryStatus::Pending,
+        order_json.delivery_location.to_owned(),
+    );
+    
+    // Insert the order and order details in a transaction
+    match conn.transaction::<_, diesel::result::Error,_>(|conn| {
+        let order: OrderModel = diesel::insert_into(orders)
+        .values(&new_order)
+        .get_result(conn)?;
+
+        for order_detail in &order_json.order_details {
+            let product: ProductModel = products
+                .filter(products::uuid.eq(&order_detail.product_id))
+                .select(ProductModel::as_select())
+                .first(conn)?;
+
+            if product.get_stock() < order_detail.quantity {
+                return Err(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::Unknown, Box::new(DatabaseErrorInfo { message : "Ordered quantity is greater than product stock".into()})))
+            }
+            
+            let od: NewOrderDetailModel =
+                    NewOrderDetailModel::new(order_detail.quantity, &product, &order);
+
+                diesel::insert_into(order_details)
+                    .values(&od)
+                    .execute(conn)?;
+
+                //update the product stock if order creation successful
+                diesel::update(&product)
+                    .set(products::stock.eq(products::stock - order_detail.quantity))
+                    .execute(conn)?;
+
+        }
+
+        Ok(HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"message": "Order created successufully"})))
+    }) {
+        Ok(http_response) => http_response,
+        Err(e) => match e {
+                diesel::result::Error::NotFound=>HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(serde_json::json!({"message":"Product not found"})),
+                diesel::result::Error::DatabaseError(_,c)=>HttpResponse::BadRequest().status(StatusCode::BAD_REQUEST).json(serde_json::json!({"message":c.message()})),
+                _=>HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message":"Ops! something went wrong"})),
+        }
+    }
+
+}
+
+
+#[post("")]
+pub async fn create_backup(
+    order_json: web::Json<OrderCreate>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
     //first validate the customer exists or not
     //before that lets check whether the provided customer id is a valid guid or not
     let customer_uuid: Uuid = match Uuid::parse_str(&order_json.customer_id) {
@@ -551,6 +659,12 @@ pub async fn create(
         }
     };
 
+    use crate::schema::customers::dsl::*;
+    use crate::schema::order_details::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{customers, products};
+
     let mut order_total: f64 = 0.0;
     (&order_json.order_details).into_iter().for_each(|od| {
         order_total += od.price;
@@ -561,12 +675,6 @@ pub async fn create(
             .status(StatusCode::BAD_REQUEST)
             .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
     }
-
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::{customers, products};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -597,10 +705,10 @@ pub async fn create(
         DeliveryStatus::Pending,
         order_json.delivery_location.to_owned(),
     );
-
+  
     match diesel::insert_into(orders)
-        .values(&order)
-        .get_result::<OrderModel>(conn)
+    .values(&order)
+    .get_result::<OrderModel>(conn)
     {
         Ok(o) => {
             //if any one of this failed, then god will help
@@ -631,7 +739,7 @@ pub async fn create(
                 }
 
                 let od: NewOrderDetailModel =
-                    NewOrderDetailModel::new(order_detail.quantity, order_detail.price, &pr, &o);
+                    NewOrderDetailModel::new(order_detail.quantity, &pr, &o);
 
                 diesel::insert_into(order_details)
                     .values(&od)
@@ -654,12 +762,14 @@ pub async fn create(
                 delivery_location: o.get_delivery_location().to_owned(),
                 delivery_status: o.get_delivery_status().to_owned(),
             };
-            HttpResponse::Ok().status(StatusCode::OK).json(order)
+            HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"order": order}))
         }
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
+
+    
 }
 
 

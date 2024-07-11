@@ -25,7 +25,6 @@ pub struct OrderDetailsResponse {
     pub price: f64,
 }
 
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewOrderDetail {

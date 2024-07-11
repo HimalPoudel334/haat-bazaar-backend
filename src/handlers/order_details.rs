@@ -81,7 +81,9 @@ pub async fn get(
         ))
         .load::<OrderDetails>(conn)
     {
-        Ok(ods) => HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"order-details": ods})),
+        Ok(ods) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"order-details": ods})),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
@@ -215,8 +217,7 @@ pub async fn add_order_detail(
     };
 
     // if product and order both exists then insert the new record into order_details table
-    let od: NewOrderDetailModel =
-        NewOrderDetailModel::new(ord_det.quantity, ord_det.price, &prod_bought, &order);
+    let od: NewOrderDetailModel = NewOrderDetailModel::new(ord_det.quantity, &prod_bought, &order);
 
     match diesel::insert_into(order_details).values(&od).execute(conn) {
         Ok(_) => HttpResponse::Ok()
