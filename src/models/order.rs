@@ -1,5 +1,6 @@
 use chrono::Days;
 use diesel::prelude::*;
+use serde::de;
 use uuid::Uuid;
 
 use crate::base_types::delivery_status::DeliveryStatus;
@@ -15,6 +16,7 @@ pub struct Order {
     uuid: String,
     created_on: String,
     fulfilled_on: String,
+    delivery_charge: f64,
     delivery_location: String,
     delivery_status: String,
     total_price: f64,
@@ -41,6 +43,10 @@ impl Order {
         self.total_price
     }
 
+    pub fn get_delivery_charge(&self) -> f64 {
+        self.delivery_charge
+    }
+
     pub fn get_delivery_location(&self) -> &str {
         &self.delivery_location
     }
@@ -60,6 +66,7 @@ pub struct NewOrder {
     uuid: String,
     created_on: String,
     fulfilled_on: String,
+    delivery_charge: f64,
     delivery_location: String,
     delivery_status: String,
     total_price: f64,
@@ -70,19 +77,21 @@ impl NewOrder {
     pub fn new(
         customer: &Customer,
         created_on: String,
-        total_price: f64,
+        delivery_charge: f64,
         delivery_status: DeliveryStatus,
         delivery_location: String,
+        order_total: f64,
     ) -> Self {
         let created_on_clone = created_on.clone();
         Self {
             uuid: Uuid::new_v4().to_string(),
             created_on,
-            total_price,
+            delivery_charge,
             fulfilled_on: Self::get_delivery_duration(&created_on_clone),
             delivery_location,
             delivery_status: delivery_status.value().to_owned(),
             customer_id: customer.get_id(),
+            total_price: order_total + delivery_charge,
         }
     }
 

@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, HttpResponse, Responder};
+use actix_web::{http::StatusCode, HttpResponse};
 use diesel::result::DatabaseErrorInformation;
 use uuid::Uuid;
 

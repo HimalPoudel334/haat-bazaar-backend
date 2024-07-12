@@ -63,7 +63,6 @@ pub async fn get(
             products::name,
             carts::quantity,
             products::price,
-            (carts::quantity * products::price),
             carts::sku,
             products::image,
             carts::created_on,
@@ -179,7 +178,6 @@ pub async fn create(
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
                 rate: product.get_price(),
-                total: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
                 image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
@@ -284,7 +282,6 @@ pub async fn update_quantity(
                 product_id: product.get_uuid().to_owned(),
                 quantity: c.get_quantity(),
                 rate: product.get_price(),
-                total: c.get_quantity() * product.get_price(),
                 sku: c.get_sku().to_owned(),
                 image: product.get_image().to_owned(),
                 created_on: c.get_created_on().to_owned(),
@@ -358,6 +355,7 @@ pub async fn delete_customer_cart(
     cust_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
+    println!("delete cart request received");
     let cust_id: String = cust_id.into_inner().0;
 
     //check if the customer id is valid uuid or not

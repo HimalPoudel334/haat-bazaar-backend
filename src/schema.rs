@@ -78,6 +78,7 @@ diesel::table! {
         uuid -> Text,
         created_on -> Text,
         fulfilled_on -> Text,
+        delivery_charge -> Double,
         delivery_location -> Text,
         delivery_status -> Text,
         total_price -> Double,

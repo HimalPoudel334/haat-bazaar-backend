@@ -10,7 +10,6 @@ pub struct Cart {
     pub product_name: String,
     pub quantity: f64,
     pub rate: f64,
-    pub total: f64,
     pub sku: String,
     pub image: String,
     pub created_on: String,
