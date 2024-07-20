@@ -53,6 +53,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
     )
     .service(
         web::scope("/payments")
+            .service(web::scope("/esewa").service(payment::esewa_payment_confirmation))
             .service(payment::create)
             .service(payment::get),
     )

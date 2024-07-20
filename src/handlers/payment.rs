@@ -1,10 +1,22 @@
+use std::{str::FromStr, time::Duration};
+
 use ::uuid::Uuid;
-use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
+use actix_web::{
+    get,
+    http::StatusCode,
+    post,
+    web::{self, Data},
+    HttpRequest, HttpResponse, Responder,
+};
 use diesel::prelude::*;
+use reqwest::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    Client, Response,
+};
 
 use crate::{
     base_types::payment_method::PaymentMethod,
-    contracts::payment::{NewPayment, Payment},
+    contracts::payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         customer::Customer as CustomerModel,
@@ -235,4 +247,75 @@ pub async fn get(
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(payment_response)
+}
+
+#[post("/payment/confirmation")]
+pub async fn esewa_payment_confirmation(
+    req: HttpRequest,
+    req_body: web::Json<EsewaCallbackResponse>,
+    client: web::Data<Client>,
+) -> impl Responder {
+    println!("Hit by esewa");
+    let txn_ref_id = req_body.transaction_details.reference_id.clone();
+    println!("Transaction ref id is {txn_ref_id}");
+
+    // Call the verification API with txn_ref_id
+    let verification_result = verify_transaction(txn_ref_id, req, client).await;
+
+    match verification_result {
+        Ok(status) if status == "COMPLETE" => {
+            // Handle successful verification
+            HttpResponse::Ok()
+                .json(serde_json::json!({"status": "success", "verification": "complete"}))
+        }
+        Ok(_) => HttpResponse::Ok()
+            .json(serde_json::json!({"status": "Khai k", "verification": "khai K"})),
+        Err(e) => {
+            eprintln!("{e}");
+            HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"status": "failure", "verification": "incomplete", "errorMessage":e.to_string()}))
+        }
+    }
+}
+
+async fn verify_transaction(
+    txn_ref_id: String,
+    req: HttpRequest,
+    client: Data<Client>,
+) -> Result<String, reqwest::Error> {
+    println!("Hit by esewa");
+
+    // Extract headers from the incoming request
+    let mut headers = HeaderMap::new();
+    for (key, value) in req.headers().iter() {
+        if let (Ok(header_name), Ok(header_value)) = (
+            HeaderName::from_str(key.as_str()),
+            HeaderValue::from_str(value.to_str().unwrap_or("")),
+        ) {
+            println!("{header_name}:{:#?}", header_value);
+            headers.insert(header_name, header_value);
+        }
+    }
+
+    let url = format!(
+        "https://rc.esewa.com.np/mobile/transaction?txnRefId={}",
+        txn_ref_id
+    );
+
+    let response: Vec<EsewaTransactionResponse> = client
+        .get(url)
+        .headers(headers)
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?
+        .json::<Vec<EsewaTransactionResponse>>()
+        .await?;
+
+    println!("----");
+    println!("response: {response:?}");
+    println!("-----");
+
+    //Ok(response.transaction_details.status.to_string())
+    Ok("Fail".to_string())
 }

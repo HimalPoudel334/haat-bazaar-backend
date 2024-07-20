@@ -1,6 +1,5 @@
 use chrono::Days;
 use diesel::prelude::*;
-use serde::de;
 use uuid::Uuid;
 
 use crate::base_types::delivery_status::DeliveryStatus;
