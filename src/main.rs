@@ -24,7 +24,8 @@ async fn main() -> std::io::Result<()> {
     let app_config = config::ApplicationConfiguration::init();
 
     //setting up the sqlite database
-    let db_pool: connection::SqliteConnectionPool = connection::establish_connection(&app_config);
+    let db_pool: connection::SqliteConnectionPool =
+        connection::establish_connection(&app_config.database_url);
 
     //setting up the request client
     let client: Client = Client::new();

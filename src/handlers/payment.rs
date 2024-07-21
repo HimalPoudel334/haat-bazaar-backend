@@ -1,21 +1,16 @@
 use std::{str::FromStr, time::Duration};
 
 use ::uuid::Uuid;
-use actix_web::{
-    get,
-    http::StatusCode,
-    post,
-    web::{self, Data},
-    HttpRequest, HttpResponse, Responder,
-};
+use actix_web::{get, http::StatusCode, post, web, HttpRequest, HttpResponse, Responder};
 use diesel::prelude::*;
 use reqwest::{
-    header::{HeaderMap, HeaderName, HeaderValue},
-    Client, Response,
+    header::{HeaderMap, HeaderValue},
+    Client,
 };
 
 use crate::{
     base_types::payment_method::PaymentMethod,
+    config::ApplicationConfiguration,
     contracts::payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -254,13 +249,14 @@ pub async fn esewa_payment_confirmation(
     req: HttpRequest,
     req_body: web::Json<EsewaCallbackResponse>,
     client: web::Data<Client>,
+    app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     println!("Hit by esewa");
     let txn_ref_id = req_body.transaction_details.reference_id.clone();
     println!("Transaction ref id is {txn_ref_id}");
 
-    // Call the verification API with txn_ref_id
-    let verification_result = verify_transaction(txn_ref_id, req, client).await;
+    //Call the verification API with txn_ref_id
+    let verification_result = verify_transaction(txn_ref_id, req, client, app_config).await;
 
     match verification_result {
         Ok(status) if status == "COMPLETE" => {
@@ -271,7 +267,7 @@ pub async fn esewa_payment_confirmation(
         Ok(_) => HttpResponse::Ok()
             .json(serde_json::json!({"status": "Khai k", "verification": "khai K"})),
         Err(e) => {
-            eprintln!("{e}");
+            eprintln!("{e:?}");
             HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
                 .json(serde_json::json!({"status": "failure", "verification": "incomplete", "errorMessage":e.to_string()}))
@@ -282,27 +278,65 @@ pub async fn esewa_payment_confirmation(
 async fn verify_transaction(
     txn_ref_id: String,
     req: HttpRequest,
-    client: Data<Client>,
+    client: web::Data<Client>,
+    app_config: web::Data<ApplicationConfiguration>,
 ) -> Result<String, reqwest::Error> {
     println!("Hit by esewa");
-
+    let merchant_id_clone = app_config.esewa_merchant_id.clone();
+    let merchant_secret_clone = app_config.esewa_merchant_secret.clone();
     // Extract headers from the incoming request
+    // let mut headers = HeaderMap::new();
+    // for (key, value) in req.headers().iter() {
+    //     if let (Ok(header_name), Ok(header_value)) = (
+    //         HeaderName::from_str(key.as_str()),
+    //         HeaderValue::from_str(value.to_str().unwrap_or("")),
+    //     ) {
+    //         println!("{header_name}:{:#?}", header_value);
+    //         headers.insert(header_name, header_value);
+    //     }
+    // }
+
+    // Extract specific headers from the incoming request
     let mut headers = HeaderMap::new();
-    for (key, value) in req.headers().iter() {
-        if let (Ok(header_name), Ok(header_value)) = (
-            HeaderName::from_str(key.as_str()),
-            HeaderValue::from_str(value.to_str().unwrap_or("")),
-        ) {
-            println!("{header_name}:{:#?}", header_value);
-            headers.insert(header_name, header_value);
-        }
+    if let Some(merchant_id) = req.headers().get("merchantId") {
+        headers.insert(
+            "merchantId",
+            HeaderValue::from_bytes(merchant_id.as_bytes()).unwrap_or(
+                HeaderValue::from_str(&app_config.esewa_merchant_id)
+                    .expect("Error setting esewa merchant id 1"),
+            ),
+        );
+    } else {
+        headers.insert(
+            "merchantId",
+            HeaderValue::from_str(&app_config.esewa_merchant_id)
+                .expect("Error setting esewa merchant id 2"),
+        );
     }
+    if let Some(merchant_secret) = req.headers().get("merchantSecret") {
+        headers.insert(
+            "merchantSecret",
+            HeaderValue::from_bytes(merchant_secret.as_bytes()).unwrap_or(
+                HeaderValue::from_str(&app_config.esewa_merchant_secret)
+                    .expect("Error setting esewa merchant secret 1"),
+            ),
+        );
+    } else {
+        headers.insert(
+            "merchantSecret",
+            HeaderValue::from_str(&app_config.esewa_merchant_secret)
+                .expect("Error setting esewa merchant secret 1"),
+        );
+    }
+
+    headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
     let url = format!(
         "https://rc.esewa.com.np/mobile/transaction?txnRefId={}",
         txn_ref_id
     );
 
+    // I don't know why array is returned
     let response: Vec<EsewaTransactionResponse> = client
         .get(url)
         .headers(headers)
@@ -317,5 +351,5 @@ async fn verify_transaction(
     println!("-----");
 
     //Ok(response.transaction_details.status.to_string())
-    Ok("Fail".to_string())
+    Ok(response[0].transaction_details.status.to_string())
 }

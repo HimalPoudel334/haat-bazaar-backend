@@ -6,6 +6,8 @@ pub struct ApplicationConfiguration {
     pub jwt_maxage: i32,
     pub product_thumbnail_path: String,
     pub product_extraimages_path: String,
+    pub esewa_merchant_id: String,
+    pub esewa_merchant_secret: String,
 }
 
 impl ApplicationConfiguration {
@@ -18,6 +20,10 @@ impl ApplicationConfiguration {
             std::env::var("PRODUCT_THUMBNAIL_URL").expect("PRODUCT_THUMBNAIL_URL must be set");
         let product_extraimages_path =
             std::env::var("PRODUCT_EXTRA_IMAGE_URL").expect("PRODUCT_EXTRA_IMAGE_URL must be set");
+        let esewa_merchant_id =
+            std::env::var("ESEWA_MERCHANT_ID").expect("ESEWA_MERCHANT_ID must be set");
+        let esewa_merchant_secret =
+            std::env::var("ESEWA_MERCHANT_SECRET").expect("ESEWA_MERCHANT_SECRET must be set");
 
         Self {
             database_url,
@@ -26,6 +32,8 @@ impl ApplicationConfiguration {
             jwt_maxage: jwt_maxage.parse::<i32>().unwrap(),
             product_thumbnail_path,
             product_extraimages_path,
+            esewa_merchant_id,
+            esewa_merchant_secret,
         }
     }
 }
