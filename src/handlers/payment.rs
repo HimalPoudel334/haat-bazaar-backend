@@ -11,7 +11,10 @@ use reqwest::{
 use crate::{
     base_types::payment_method::PaymentMethod,
     config::ApplicationConfiguration,
-    contracts::payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
+    contracts::{
+        khalti_payment::KhaltiPayment,
+        payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         customer::Customer as CustomerModel,
@@ -352,4 +355,11 @@ async fn verify_transaction(
 
     //Ok(response.transaction_details.status.to_string())
     Ok(response[0].transaction_details.status.to_string())
+}
+
+//khalti payment integration
+pub async fn khalti_payment_get_pidx(req_json: web::Json<KhaltiPayment>) -> impl Responder {
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(serde_json::json!({"message": "message", "pidx": "khalti_pidx"}))
 }

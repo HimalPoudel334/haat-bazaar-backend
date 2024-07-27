@@ -3,6 +3,7 @@ pub mod category;
 pub mod customer;
 pub mod invoice;
 pub mod invoice_item;
+pub mod khalti_payment;
 pub mod order;
 pub mod order_details;
 pub mod payment;
