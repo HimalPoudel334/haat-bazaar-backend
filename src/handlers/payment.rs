@@ -359,8 +359,9 @@ async fn verify_transaction(
 }
 
 //khalti payment integration
+#[post("/payment")]
 pub async fn khalti_payment_get_pidx(
-    req_json: web::Json<KhaltiPayment>,
+    //req_json: web::Json<KhaltiPayment>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
@@ -414,7 +415,7 @@ pub async fn khalti_payment_get_pidx(
         merchant_extra: String::from(""),
     };
 
-    let response: KhaltiResponse = match client
+    let response_result = client
         .post(khalti_url)
         .header(
             AUTHORIZATION,
@@ -424,18 +425,27 @@ pub async fn khalti_payment_get_pidx(
         .timeout(Duration::from_secs(10))
         .json(&khalti_payment_payload)
         .send()
-        .await
-    {
+        .await;
+
+    let response: KhaltiResponse = match response_result {
         Ok(res) => match res.json::<KhaltiResponse>().await {
             Ok(r) => r,
             Err(er) => {
                 eprintln!("{er}");
-                return HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": format!("Error parsing response from khalti: {}", er) }));
+                return HttpResponse::InternalServerError()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .json(serde_json::json!({
+                        "message": format!("Error parsing response from khalti: {}", er)
+                    }));
             }
         },
         Err(e) => {
             eprintln!("{e}");
-            return HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": format!("Error getting response from khalti: {}", e) }));
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({
+                    "message": format!("Error getting response from khalti: {}", e)
+                }));
         }
     };
 
@@ -445,4 +455,8 @@ pub async fn khalti_payment_get_pidx(
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"message": "success", "pidx": response.pidx}))
+}
+
+pub async fn get_pidx() -> impl Responder {
+    HttpResponse::Ok().finish()
 }
