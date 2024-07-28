@@ -4,7 +4,7 @@ use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, post, web, HttpRequest, HttpResponse, Responder};
 use diesel::prelude::*;
 use reqwest::{
-    header::{HeaderMap, HeaderValue},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION},
     Client,
 };
 
@@ -285,8 +285,7 @@ async fn verify_transaction(
     app_config: web::Data<ApplicationConfiguration>,
 ) -> Result<String, reqwest::Error> {
     println!("Hit by esewa");
-    let merchant_id_clone = app_config.esewa_merchant_id.clone();
-    let merchant_secret_clone = app_config.esewa_merchant_secret.clone();
+
     // Extract headers from the incoming request
     // let mut headers = HeaderMap::new();
     // for (key, value) in req.headers().iter() {
@@ -358,8 +357,29 @@ async fn verify_transaction(
 }
 
 //khalti payment integration
-pub async fn khalti_payment_get_pidx(req_json: web::Json<KhaltiPayment>) -> impl Responder {
-    HttpResponse::Ok()
+pub async fn khalti_payment_get_pidx(
+    req_json: web::Json<KhaltiPayment>,
+    client: web::Data<Client>,
+    app_config: web::Data<ApplicationConfiguration>,
+) -> Result<impl Responder, reqwest::Error> {
+    let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
+
+    let response = client
+        .get(khalti_url)
+        .header(
+            AUTHORIZATION,
+            HeaderValue::from_str(&app_config.khalti_test_public_key).unwrap(),
+        )
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?
+        .json::<Vec<EsewaTransactionResponse>>()
+        .await?;
+
+    println!("----");
+    println!("response: {response:?}");
+    println!("-----");
+    Ok(HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"message": "message", "pidx": "khalti_pidx"}))
+        .json(serde_json::json!({"message": "message", "pidx": "khalti_pidx"})))
 }
