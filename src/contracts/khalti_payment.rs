@@ -21,13 +21,13 @@ pub struct CustomerInfo {
     pub phone: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct AmountBreakdown {
     pub label: String,
     pub amount: f64,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ProductDetail {
     pub identity: String,
     pub name: String,

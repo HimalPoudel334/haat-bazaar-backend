@@ -4,7 +4,7 @@ use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, post, web, HttpRequest, HttpResponse, Responder};
 use diesel::prelude::*;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
     Client,
 };
 
@@ -12,7 +12,7 @@ use crate::{
     base_types::payment_method::PaymentMethod,
     config::ApplicationConfiguration,
     contracts::{
-        khalti_payment::KhaltiPayment,
+        khalti_payment::{AmountBreakdown, CustomerInfo, KhaltiPayment, ProductDetail},
         payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -364,16 +364,66 @@ pub async fn khalti_payment_get_pidx(
 ) -> Result<impl Responder, reqwest::Error> {
     let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
 
+    //Create a Khalti payment struct
+    let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
+        return_url: "http://0.0.0.0:8080/payments/khalti/khalti_response_pidx/".into(),
+        website_url: "http://0.0.0.0:8080/".into(),
+        amount: 1300.0,                      //get from the request body
+        purchase_order_id: "some id".into(), //get from request body
+        purchase_order_name: "some order name".into(),
+        customer_info: CustomerInfo {
+            name: "Sallu bhai".into(),
+            email: "Sallu@bhai.com".into(),
+            phone: "9800000001".into(),
+        },
+        amount_breakdown: Some(
+            [
+                AmountBreakdown {
+                    label: "some label".into(),
+                    amount: 1000.0,
+                },
+                AmountBreakdown {
+                    label: "some label".into(),
+                    amount: 300.0,
+                },
+            ]
+            .to_vec(),
+        ),
+        product_details: Some(
+            [
+                ProductDetail {
+                    identity: "some product id1".into(),
+                    name: "some product name1".into(),
+                    total_price: 500.0,
+                    unit_price: 250.0,
+                    quantity: 2,
+                },
+                ProductDetail {
+                    identity: "some product id2".into(),
+                    name: "some product name2".into(),
+                    total_price: 500.0,
+                    unit_price: 100.0,
+                    quantity: 5,
+                },
+            ]
+            .to_vec(),
+        ),
+        merchant_username: "khalti username".into(),
+        merchant_extra: String::from(""),
+    };
+
     let response = client
-        .get(khalti_url)
+        .post(khalti_url)
         .header(
             AUTHORIZATION,
-            HeaderValue::from_str(&app_config.khalti_test_public_key).unwrap(),
+            &format!("Key {}", &app_config.khalti_live_public_key),
         )
+        .header(CONTENT_TYPE, "application/json")
         .timeout(Duration::from_secs(10))
+        .json(&khalti_payment_payload)
         .send()
         .await?
-        .json::<Vec<EsewaTransactionResponse>>()
+        .json()
         .await?;
 
     println!("----");
