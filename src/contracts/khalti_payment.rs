@@ -35,3 +35,11 @@ pub struct ProductDetail {
     pub quantity: i32,
     pub unit_price: f64,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct KhaltiResponse {
+    pub pidx: String,
+    pub payment_url: String,
+    pub expires_at: String,
+    pub expires_in: i32,
+}
