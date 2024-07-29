@@ -10,6 +10,7 @@ pub struct Customer {
     pub first_name: String,
     pub last_name: String,
     pub phone_number: String,
+    pub email: String,
 }
 
 #[derive(Deserialize)]
@@ -18,5 +19,6 @@ pub struct CustomerCreate {
     pub first_name: String,
     pub last_name: String,
     pub phone_number: String,
+    pub email: String,
     pub password: String,
 }

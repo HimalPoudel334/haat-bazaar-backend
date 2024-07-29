@@ -15,6 +15,7 @@ use crate::{
         khalti_payment::{
             AmountBreakdown, CustomerInfo, KhaltiPayment, KhaltiResponse, ProductDetail,
         },
+        order::OrderCreate,
         payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -361,7 +362,7 @@ async fn verify_transaction(
 //khalti payment integration
 #[post("/payment")]
 pub async fn khalti_payment_get_pidx(
-    //req_json: web::Json<KhaltiPayment>,
+    req_json: web::Json<OrderCreate>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
@@ -371,7 +372,7 @@ pub async fn khalti_payment_get_pidx(
     let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
         return_url: "http://0.0.0.0:8080/payments/khalti/khalti_response_pidx/".into(),
         website_url: "http://0.0.0.0:8080/".into(),
-        amount: 1300.0,                      //get from the request body
+        amount: req_json.total_price,        //get from the request body
         purchase_order_id: "some id".into(), //get from request body
         purchase_order_name: "some order name".into(),
         customer_info: CustomerInfo {
@@ -455,8 +456,4 @@ pub async fn khalti_payment_get_pidx(
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"message": "success", "pidx": response.pidx}))
-}
-
-pub async fn get_pidx() -> impl Responder {
-    HttpResponse::Ok().finish()
 }

@@ -27,6 +27,7 @@ diesel::table! {
         first_name -> Text,
         last_name -> Text,
         phone_number -> Text,
+        email -> Text,
         password -> Text,
     }
 }

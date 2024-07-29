@@ -12,6 +12,7 @@ pub struct Customer {
     first_name: String,
     last_name: String,
     phone_number: String,
+    email: String,
     password: String,
 }
 
@@ -40,6 +41,10 @@ impl Customer {
         &self.phone_number
     }
 
+    pub fn get_email(&self) -> &String {
+        &self.email
+    }
+
     pub fn get_password(&self) -> &String {
         &self.password
     }
@@ -52,6 +57,7 @@ pub struct NewCustomer {
     first_name: String,
     last_name: String,
     phone_number: String,
+    email: String,
     password: String,
 }
 
@@ -60,6 +66,7 @@ impl NewCustomer {
         first_name: String,
         last_name: String,
         phone_number: PhoneNumber,
+        email: String,
         password: String,
     ) -> Self {
         Self {
@@ -67,6 +74,7 @@ impl NewCustomer {
             first_name,
             last_name,
             phone_number: phone_number.get_number(),
+            email,
             password,
         }
     }

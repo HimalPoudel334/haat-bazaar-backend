@@ -18,13 +18,13 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     let conn = &mut get_conn(&pool);
 
     let customers_vec = customers
-        .select((uuid, first_name, last_name, phone_number))
+        .select((uuid, first_name, last_name, phone_number, email))
         .load::<Customer>(conn);
 
     match customers_vec {
         Ok(cust_v) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(serde_json::json!({"data": cust_v})),
+            .json(serde_json::json!({"customers": cust_v})),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": e.to_string()})),
@@ -51,19 +51,24 @@ pub async fn create(
     let conn = &mut get_conn(&pool);
 
     match customers
-        .filter(phone_number.eq(&customer.phone_number))
+        .filter(
+            phone_number
+                .eq(&customer.phone_number)
+                .or(email.eq(&customer.email)),
+        )
         .select(CustomerModel::as_select())
         .first(conn)
         .optional()
     {
         Ok(Some(_)) => HttpResponse::Conflict()
             .status(StatusCode::CONFLICT)
-            .json(serde_json::json!({"message": "Phone number already used"})),
+            .json(serde_json::json!({"message": "Email or Phone number already used"})),
         Ok(None) => {
             let new_customer = NewCustomer::new(
                 customer.first_name.to_owned(),
                 customer.last_name.to_owned(),
                 phone_num,
+                customer.email.to_owned(),
                 hash_password(&customer.password),
             );
 
@@ -77,6 +82,7 @@ pub async fn create(
                         last_name: c.get_last_name().to_owned(),
                         uuid: c.get_uuid().to_owned(),
                         phone_number: c.get_phone_number().to_owned(),
+                        email: c.get_email().into(),
                     };
                     HttpResponse::Ok()
                         .status(StatusCode::OK)
