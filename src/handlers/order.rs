@@ -38,7 +38,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         String,
         String,
         f64,
-        (String, String, String, String),
+        (String, String, String, String, String),
         (
             String,
             f64,
@@ -73,6 +73,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 customers::first_name,
                 customers::last_name,
                 customers::phone_number,
+                customers::email
             ),
             (
                 order_details::uuid,
@@ -100,7 +101,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     //     order_delivery_location,
     //     order_delivery_status,
     //     order_total_price,
-    //     (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+    //     (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
     //     (
     //         order_item_uuid,
     //         order_item_quantity,
@@ -129,6 +130,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     //             first_name: customer_first_name,
     //             last_name: customer_last_name,
     //             phone_number: customer_phone_number,
+    //             email: customer_email
     //         },
     //         order_items: vec![OrderItemResponse {
     //             uuid: order_item_uuid,
@@ -163,7 +165,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
-                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
                 (
                     order_item_uuid,
                     order_item_quantity,
@@ -192,6 +194,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                         first_name: customer_first_name,
                         last_name: customer_last_name,
                         phone_number: customer_phone_number,
+                        email: customer_email
                     },
                     order_items: vec![OrderItemResponse {
                         uuid: order_item_uuid,
@@ -255,7 +258,7 @@ pub async fn get_order(
         String,
         String,
         f64,
-        (String, String, String, String),
+        (String, String, String, String, String),
         (
             String,
             f64,
@@ -291,6 +294,7 @@ pub async fn get_order(
                 customers::first_name,
                 customers::last_name,
                 customers::phone_number,
+                customers::email
             ),
             (
                 order_details::uuid,
@@ -319,7 +323,7 @@ pub async fn get_order(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
-                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number),
+                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
                 (
                     order_item_uuid,
                     order_item_quantity,
@@ -348,6 +352,7 @@ pub async fn get_order(
                     first_name: customer_first_name,
                     last_name: customer_last_name,
                     phone_number: customer_phone_number,
+                    email: customer_email
                 },
                 order_items: vec![OrderItemResponse {
                     uuid: order_item_uuid,

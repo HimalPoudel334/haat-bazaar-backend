@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::{
-    base_types::phone_number::PhoneNumber,
+    base_types::{email::Email, phone_number::PhoneNumber},
     contracts::customer::{Customer, CustomerCreate},
     db::connection::{get_conn, SqliteConnectionPool},
     models::customer::{Customer as CustomerModel, NewCustomer},
@@ -44,6 +44,15 @@ pub async fn create(
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
                 .json(serde_json::json!({"message": e}));
+        }
+    };
+
+    let valid_email: Email = match Email::from_str(customer.email.to_owned()) {
+        Ok(em) => em,
+        Err(er) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": er}));
         }
     };
 
@@ -161,6 +170,46 @@ pub async fn get_customer_from_phone_number(
 
     match customers
         .filter(phone_number.eq(&ph_num.get_number()))
+        .select(Customer::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(cust) => match cust {
+            Some(c) => HttpResponse::Ok().status(StatusCode::OK).json(c),
+            None => HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Customer not found"})),
+        },
+        Err(e) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
+    }
+}
+
+#[get("/email/{email_str}")]
+pub async fn get_customer_from_email(
+    email_str: web::Path<(String,)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let email_str: String = email_str.into_inner().0;
+    //check if the user_id is valid uuid or not before trip to db
+    let valid_email: Email = match Email::from_str(email_str) {
+        Ok(p) => p,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": e}));
+        }
+    };
+
+    use crate::schema::customers;
+    use crate::schema::customers::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    match customers
+        .filter(customers::email.eq(&valid_email.get_email()))
         .select(Customer::as_select())
         .first(conn)
         .optional()

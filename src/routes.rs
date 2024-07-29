@@ -9,6 +9,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(customer::get)
             .service(customer::get_customer)
             .service(customer::get_customer_from_phone_number)
+            .service(customer::get_customer_from_email)
             .service(customer::edit)
             .service(customer::delete),
     )
