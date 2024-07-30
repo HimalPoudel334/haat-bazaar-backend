@@ -2,9 +2,9 @@ use actix_web::{http::StatusCode, HttpResponse};
 use diesel::result::DatabaseErrorInformation;
 use uuid::Uuid;
 
-pub fn validate_uuid(uuid: &str) -> Result<Uuid, HttpResponse> {
+pub fn validate_uuid(uuid: &str) -> Result<String, HttpResponse> {
     match Uuid::parse_str(uuid) {
-        Ok(uid) => Ok(uid),
+        Ok(uid) => Ok(uid.to_string()),
         Err(_) => Err(HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
             .json(serde_json::json!({"message": "Invalid uuid"}))),

@@ -1,6 +1,7 @@
 pub enum PaymentMethod {
     Cash,
     Esewa,
+    Khalti,
     BankTransfer,
     Coupon,
     CreditCard,
@@ -11,6 +12,7 @@ impl PaymentMethod {
         match *self {
             PaymentMethod::Cash => "Cash",
             PaymentMethod::Esewa => "Esewa",
+            PaymentMethod::Khalti => "Khalti",
             PaymentMethod::BankTransfer => "Bank Transfer",
             PaymentMethod::CreditCard => "Credit Card",
             PaymentMethod::Coupon => "Coupon",
@@ -21,10 +23,11 @@ impl PaymentMethod {
         match string_value.as_str() {
             "Cash" => Ok(PaymentMethod::Cash),
             "Esewa" => Ok(PaymentMethod::Esewa),
+            "Khalti" => Ok(PaymentMethod::Khalti),
             "Bank Transfer" => Ok(PaymentMethod::BankTransfer),
             "Credit Card" => Ok(PaymentMethod::CreditCard),
             "Coupon" => Ok(PaymentMethod::Coupon),
-            _ => Err("Invalid payment method. Valid values are 'Cash', 'Esewa', 'Bank Transfer', 'Credit Card' and 'Coupon'")
+            _ => Err("Invalid payment method. Valid values are 'Cash', 'Esewa', 'Khalti', 'Bank Transfer', 'Credit Card' and 'Coupon'")
         }
     }
 }

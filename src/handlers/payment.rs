@@ -24,6 +24,7 @@ use crate::{
         order::Order as OrderModel,
         payment::{NewPayment as NewPaymentModel, Payment as PaymentModel},
     },
+    utils,
 };
 
 // I think any other method should not exists
@@ -362,17 +363,43 @@ async fn verify_transaction(
 //khalti payment integration
 #[post("/payment")]
 pub async fn khalti_payment_get_pidx(
-    req_json: web::Json<OrderCreate>,
+    order_json: web::Json<OrderCreate>,
+    pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
-    let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
+    use crate::schema::customers;
+    use crate::schema::customers::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    let customer_id: String = utils::uuid_validator::validate_uuid(&order_json.customer_id)?;
+
+    let customer: CustomerModel = match customers
+        .filter(uuid.eq(&customer_id))
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Customer not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
 
     //Create a Khalti payment struct
     let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
         return_url: "http://0.0.0.0:8080/payments/khalti/khalti_response_pidx/".into(),
         website_url: "http://0.0.0.0:8080/".into(),
-        amount: req_json.total_price,        //get from the request body
+        amount: order_json.total_price, //get from the request body
         purchase_order_id: "some id".into(), //get from request body
         purchase_order_name: "some order name".into(),
         customer_info: CustomerInfo {
@@ -415,6 +442,8 @@ pub async fn khalti_payment_get_pidx(
         merchant_username: "khalti username".into(),
         merchant_extra: String::from(""),
     };
+
+    let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
 
     let response_result = client
         .post(khalti_url)

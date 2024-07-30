@@ -650,15 +650,15 @@ pub async fn create(
         }
 
         let order_vm: Order = Order {
-                customer_id: customer_uuid.to_string(),
-                created_on: order.get_created_on().to_owned(),
-                fulfilled_on: order.get_fulfilled_on().to_owned(),
-                total_price: order.get_total_price(),
-                uuid: order.get_uuid().to_string(),
-                delivery_charge: order.get_delivery_charge(),
-                delivery_location: order.get_delivery_location().to_owned(),
-                delivery_status: order.get_delivery_status().to_owned(),
-            };
+            customer_id: customer_uuid.to_string(),
+            created_on: order.get_created_on().to_owned(),
+            fulfilled_on: order.get_fulfilled_on().to_owned(),
+            total_price: order.get_total_price(),
+            uuid: order.get_uuid().to_string(),
+            delivery_charge: order.get_delivery_charge(),
+            delivery_location: order.get_delivery_location().to_owned(),
+            delivery_status: order.get_delivery_status().to_owned(),
+        };
 
         Ok(HttpResponse::Ok()
             .status(StatusCode::OK)
