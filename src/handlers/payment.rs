@@ -363,7 +363,7 @@ async fn verify_transaction(
 //khalti payment integration
 #[post("/payment")]
 pub async fn khalti_payment_get_pidx(
-    order_json: web::Json<OrderCreate>,
+    //order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
@@ -374,32 +374,35 @@ pub async fn khalti_payment_get_pidx(
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let customer_id: String = utils::uuid_validator::validate_uuid(&order_json.customer_id)?;
-
-    let customer: CustomerModel = match customers
-        .filter(uuid.eq(&customer_id))
-        .select(CustomerModel::as_select())
-        .first(conn)
-        .optional()
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Customer not found"}))
-        }
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
-        }
-    };
-
+    // let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+    //     Ok(c) => c,
+    //     Err(http_response) => return http_response,
+    // };
+    //
+    // let customer: CustomerModel = match customers
+    //     .filter(uuid.eq(&customer_id))
+    //     .select(CustomerModel::as_select())
+    //     .first(conn)
+    //     .optional()
+    // {
+    //     Ok(Some(c)) => c,
+    //     Ok(None) => {
+    //         return HttpResponse::BadRequest()
+    //             .status(StatusCode::BAD_REQUEST)
+    //             .json(serde_json::json!({"message": "Customer not found"}))
+    //     }
+    //     Err(_) => {
+    //         return HttpResponse::BadRequest()
+    //             .status(StatusCode::BAD_REQUEST)
+    //             .json(serde_json::json!({"message": "Ops! something went wrong"}))
+    //     }
+    // };
+    //
     //Create a Khalti payment struct
     let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
         return_url: "http://0.0.0.0:8080/payments/khalti/khalti_response_pidx/".into(),
         website_url: "http://0.0.0.0:8080/".into(),
-        amount: order_json.total_price, //get from the request body
+        amount: 1300.0, // order_json.total_price, //get from the request body
         purchase_order_id: "some id".into(), //get from request body
         purchase_order_name: "some order name".into(),
         customer_info: CustomerInfo {
@@ -449,7 +452,7 @@ pub async fn khalti_payment_get_pidx(
         .post(khalti_url)
         .header(
             AUTHORIZATION,
-            &format!("Key {}", &app_config.khalti_live_public_key),
+            &format!("Key live_secret_key_{}", &app_config.khalti_live_secret_key),
         )
         .header(CONTENT_TYPE, "application/json")
         .timeout(Duration::from_secs(10))
@@ -457,27 +460,42 @@ pub async fn khalti_payment_get_pidx(
         .send()
         .await;
 
-    let response: KhaltiResponse = match response_result {
-        Ok(res) => match res.json::<KhaltiResponse>().await {
-            Ok(r) => r,
-            Err(er) => {
-                eprintln!("{er}");
+    let response: KhaltiResponse =
+        match response_result {
+            Ok(res) => match res.status() {
+                reqwest::StatusCode::OK => match res.json::<KhaltiResponse>().await {
+                    Ok(r) => r,
+                    Err(er) => {
+                        eprintln!("{er}");
+                        return HttpResponse::InternalServerError()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .json(serde_json::json!({
+                                "message": format!("Error parsing response from khalti: {}", er)
+                            }));
+                    }
+                },
+                _ => match res.json::<serde_json::Value>().await {
+                    Ok(v) => {
+                        return HttpResponse::Unauthorized()
+                            .status(StatusCode::UNAUTHORIZED)
+                            .json(v)
+                    }
+                    Err(e) => return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({
+                            "message": format!("Error parsing error response from khalti: {}", e)
+                        })),
+                },
+            },
+            Err(e) => {
+                eprintln!("{e}");
                 return HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .json(serde_json::json!({
-                        "message": format!("Error parsing response from khalti: {}", er)
+                        "message": format!("Error getting response from khalti: {}", e)
                     }));
             }
-        },
-        Err(e) => {
-            eprintln!("{e}");
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({
-                    "message": format!("Error getting response from khalti: {}", e)
-                }));
-        }
-    };
+        };
 
     println!("----");
     println!("response: {response:?}");
