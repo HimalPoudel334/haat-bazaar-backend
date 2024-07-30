@@ -63,7 +63,7 @@ pub async fn create(
         .filter(
             phone_number
                 .eq(&customer.phone_number)
-                .or(email.eq(&customer.email)),
+                .or(email.eq(&valid_email.get_email())),
         )
         .select(CustomerModel::as_select())
         .first(conn)
@@ -77,7 +77,7 @@ pub async fn create(
                 customer.first_name.to_owned(),
                 customer.last_name.to_owned(),
                 phone_num,
-                customer.email.to_owned(),
+                valid_email.get_email(),
                 hash_password(&customer.password),
             );
 
