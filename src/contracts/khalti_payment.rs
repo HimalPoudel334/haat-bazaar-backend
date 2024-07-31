@@ -36,7 +36,7 @@ pub struct ProductDetail {
     pub unit_price: f64,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct KhaltiResponse {
     pub pidx: String,
     pub payment_url: String,

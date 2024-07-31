@@ -400,7 +400,7 @@ pub async fn khalti_payment_get_pidx(
     //
     //Create a Khalti payment struct
     let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
-        return_url: "http://0.0.0.0:8080/payments/khalti/khalti_response_pidx/".into(),
+        return_url: "http://0.0.0.0:8080/payments/khalti/payment/".into(),
         website_url: "http://0.0.0.0:8080/".into(),
         amount: 1300.0, // order_json.total_price, //get from the request body
         purchase_order_id: "some id".into(), //get from request body
@@ -452,7 +452,7 @@ pub async fn khalti_payment_get_pidx(
         .post(khalti_url)
         .header(
             AUTHORIZATION,
-            &format!("Key live_secret_key_{}", &app_config.khalti_live_secret_key),
+            &format!("key {}", &app_config.khalti_live_secret_key),
         )
         .header(CONTENT_TYPE, "application/json")
         .timeout(Duration::from_secs(10))
@@ -500,7 +500,8 @@ pub async fn khalti_payment_get_pidx(
     println!("----");
     println!("response: {response:?}");
     println!("-----");
+
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(serde_json::json!({"message": "success", "pidx": response.pidx}))
+        .json(serde_json::json!({"message": "success", "khaltiResponse": response}))
 }
