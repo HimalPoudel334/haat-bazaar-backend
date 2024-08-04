@@ -13,7 +13,8 @@ use crate::{
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, CustomerInfo, KhaltiPayment, KhaltiResponse, ProductDetail,
+            AmountBreakdown, CustomerInfo, KhaltiPayment, KhaltiResponse, KhaltiResponseCamelCase,
+            ProductDetail,
         },
         order::OrderCreate,
         payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
@@ -371,6 +372,8 @@ pub async fn khalti_payment_get_pidx(
     use crate::schema::customers;
     use crate::schema::customers::dsl::*;
 
+    println!("Hit by android");
+
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
@@ -460,11 +463,11 @@ pub async fn khalti_payment_get_pidx(
         .send()
         .await;
 
-    let response: KhaltiResponse =
+    let response: KhaltiResponseCamelCase =
         match response_result {
             Ok(res) => match res.status() {
                 reqwest::StatusCode::OK => match res.json::<KhaltiResponse>().await {
-                    Ok(r) => r,
+                    Ok(r) => r.into(),
                     Err(er) => {
                         eprintln!("{er}");
                         return HttpResponse::InternalServerError()
@@ -501,7 +504,5 @@ pub async fn khalti_payment_get_pidx(
     println!("response: {response:?}");
     println!("-----");
 
-    HttpResponse::Ok()
-        .status(StatusCode::OK)
-        .json(serde_json::json!({"message": "success", "khaltiResponse": response}))
+    HttpResponse::Ok().status(StatusCode::OK).json(response)
 }

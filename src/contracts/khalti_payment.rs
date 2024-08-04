@@ -43,3 +43,23 @@ pub struct KhaltiResponse {
     pub expires_at: String,
     pub expires_in: i32,
 }
+
+#[derive(Deserialize, Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KhaltiResponseCamelCase {
+    pub pidx: String,
+    pub payment_url: String,
+    pub expires_at: String,
+    pub expires_in: i32,
+}
+
+impl From<KhaltiResponse> for KhaltiResponseCamelCase {
+    fn from(api_response: KhaltiResponse) -> Self {
+        Self {
+            pidx: api_response.pidx,
+            payment_url: api_response.payment_url,
+            expires_at: api_response.expires_at,
+            expires_in: api_response.expires_in,
+        }
+    }
+}
