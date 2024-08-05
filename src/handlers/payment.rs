@@ -374,135 +374,144 @@ pub async fn khalti_payment_get_pidx(
 
     println!("Hit by android");
 
-    //get a pooled connection from db
-    let conn = &mut get_conn(&pool);
+    // //get a pooled connection from db
+    // let conn = &mut get_conn(&pool);
 
-    // let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
-    //     Ok(c) => c,
-    //     Err(http_response) => return http_response,
+    // // let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+    // //     Ok(c) => c,
+    // //     Err(http_response) => return http_response,
+    // // };
+    // //
+    // // let customer: CustomerModel = match customers
+    // //     .filter(uuid.eq(&customer_id))
+    // //     .select(CustomerModel::as_select())
+    // //     .first(conn)
+    // //     .optional()
+    // // {
+    // //     Ok(Some(c)) => c,
+    // //     Ok(None) => {
+    // //         return HttpResponse::BadRequest()
+    // //             .status(StatusCode::BAD_REQUEST)
+    // //             .json(serde_json::json!({"message": "Customer not found"}))
+    // //     }
+    // //     Err(_) => {
+    // //         return HttpResponse::BadRequest()
+    // //             .status(StatusCode::BAD_REQUEST)
+    // //             .json(serde_json::json!({"message": "Ops! something went wrong"}))
+    // //     }
+    // // };
+    // //
+    // //Create a Khalti payment struct
+    // let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
+    //     return_url: "http://0.0.0.0:8080/payments/khalti/payment/".into(),
+    //     website_url: "http://0.0.0.0:8080/".into(),
+    //     amount: 1300.0, // order_json.total_price, //get from the request body
+    //     purchase_order_id: "some id".into(), //get from request body
+    //     purchase_order_name: "some order name".into(),
+    //     customer_info: CustomerInfo {
+    //         name: "Sallu bhai".into(),
+    //         email: "Sallu@bhai.com".into(),
+    //         phone: "9800000001".into(),
+    //     },
+    //     amount_breakdown: Some(
+    //         [
+    //             AmountBreakdown {
+    //                 label: "some label".into(),
+    //                 amount: 1000.0,
+    //             },
+    //             AmountBreakdown {
+    //                 label: "some label".into(),
+    //                 amount: 300.0,
+    //             },
+    //         ]
+    //         .to_vec(),
+    //     ),
+    //     product_details: Some(
+    //         [
+    //             ProductDetail {
+    //                 identity: "some product id1".into(),
+    //                 name: "some product name1".into(),
+    //                 total_price: 500.0,
+    //                 unit_price: 250.0,
+    //                 quantity: 2,
+    //             },
+    //             ProductDetail {
+    //                 identity: "some product id2".into(),
+    //                 name: "some product name2".into(),
+    //                 total_price: 500.0,
+    //                 unit_price: 100.0,
+    //                 quantity: 5,
+    //             },
+    //         ]
+    //         .to_vec(),
+    //     ),
+    //     merchant_username: "khalti username".into(),
+    //     merchant_extra: String::from(""),
     // };
-    //
-    // let customer: CustomerModel = match customers
-    //     .filter(uuid.eq(&customer_id))
-    //     .select(CustomerModel::as_select())
-    //     .first(conn)
-    //     .optional()
-    // {
-    //     Ok(Some(c)) => c,
-    //     Ok(None) => {
-    //         return HttpResponse::BadRequest()
-    //             .status(StatusCode::BAD_REQUEST)
-    //             .json(serde_json::json!({"message": "Customer not found"}))
-    //     }
-    //     Err(_) => {
-    //         return HttpResponse::BadRequest()
-    //             .status(StatusCode::BAD_REQUEST)
-    //             .json(serde_json::json!({"message": "Ops! something went wrong"}))
-    //     }
-    // };
-    //
-    //Create a Khalti payment struct
-    let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
-        return_url: "http://0.0.0.0:8080/payments/khalti/payment/".into(),
-        website_url: "http://0.0.0.0:8080/".into(),
-        amount: 1300.0, // order_json.total_price, //get from the request body
-        purchase_order_id: "some id".into(), //get from request body
-        purchase_order_name: "some order name".into(),
-        customer_info: CustomerInfo {
-            name: "Sallu bhai".into(),
-            email: "Sallu@bhai.com".into(),
-            phone: "9800000001".into(),
-        },
-        amount_breakdown: Some(
-            [
-                AmountBreakdown {
-                    label: "some label".into(),
-                    amount: 1000.0,
-                },
-                AmountBreakdown {
-                    label: "some label".into(),
-                    amount: 300.0,
-                },
-            ]
-            .to_vec(),
-        ),
-        product_details: Some(
-            [
-                ProductDetail {
-                    identity: "some product id1".into(),
-                    name: "some product name1".into(),
-                    total_price: 500.0,
-                    unit_price: 250.0,
-                    quantity: 2,
-                },
-                ProductDetail {
-                    identity: "some product id2".into(),
-                    name: "some product name2".into(),
-                    total_price: 500.0,
-                    unit_price: 100.0,
-                    quantity: 5,
-                },
-            ]
-            .to_vec(),
-        ),
-        merchant_username: "khalti username".into(),
-        merchant_extra: String::from(""),
-    };
 
-    let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
+    // let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
 
-    let response_result = client
-        .post(khalti_url)
-        .header(
-            AUTHORIZATION,
-            &format!("key {}", &app_config.khalti_live_secret_key),
-        )
-        .header(CONTENT_TYPE, "application/json")
-        .timeout(Duration::from_secs(10))
-        .json(&khalti_payment_payload)
-        .send()
-        .await;
+    // let response_result = client
+    //     .post(khalti_url)
+    //     .header(
+    //         AUTHORIZATION,
+    //         &format!("key {}", &app_config.khalti_live_secret_key),
+    //     )
+    //     .header(CONTENT_TYPE, "application/json")
+    //     .timeout(Duration::from_secs(10))
+    //     .json(&khalti_payment_payload)
+    //     .send()
+    //     .await;
 
-    let response: KhaltiResponseCamelCase =
-        match response_result {
-            Ok(res) => match res.status() {
-                reqwest::StatusCode::OK => match res.json::<KhaltiResponse>().await {
-                    Ok(r) => r.into(),
-                    Err(er) => {
-                        eprintln!("{er}");
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({
-                                "message": format!("Error parsing response from khalti: {}", er)
-                            }));
-                    }
-                },
-                _ => match res.json::<serde_json::Value>().await {
-                    Ok(v) => {
-                        return HttpResponse::Unauthorized()
-                            .status(StatusCode::UNAUTHORIZED)
-                            .json(v)
-                    }
-                    Err(e) => return HttpResponse::InternalServerError()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .json(serde_json::json!({
-                            "message": format!("Error parsing error response from khalti: {}", e)
-                        })),
-                },
-            },
-            Err(e) => {
-                eprintln!("{e}");
-                return HttpResponse::InternalServerError()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .json(serde_json::json!({
-                        "message": format!("Error getting response from khalti: {}", e)
-                    }));
-            }
-        };
+    // let response: KhaltiResponseCamelCase =
+    //     match response_result {
+    //         Ok(res) => match res.status() {
+    //             reqwest::StatusCode::OK => match res.json::<KhaltiResponse>().await {
+    //                 Ok(r) => r.into(),
+    //                 Err(er) => {
+    //                     eprintln!("{er}");
+    //                     return HttpResponse::InternalServerError()
+    //                         .status(StatusCode::INTERNAL_SERVER_ERROR)
+    //                         .json(serde_json::json!({
+    //                             "message": format!("Error parsing response from khalti: {}", er)
+    //                         }));
+    //                 }
+    //             },
+    //             _ => match res.json::<serde_json::Value>().await {
+    //                 Ok(v) => {
+    //                     return HttpResponse::Unauthorized()
+    //                         .status(StatusCode::UNAUTHORIZED)
+    //                         .json(v)
+    //                 }
+    //                 Err(e) => return HttpResponse::InternalServerError()
+    //                     .status(StatusCode::INTERNAL_SERVER_ERROR)
+    //                     .json(serde_json::json!({
+    //                         "message": format!("Error parsing error response from khalti: {}", e)
+    //                     })),
+    //             },
+    //         },
+    //         Err(e) => {
+    //             eprintln!("{e}");
+    //             return HttpResponse::InternalServerError()
+    //                 .status(StatusCode::INTERNAL_SERVER_ERROR)
+    //                 .json(serde_json::json!({
+    //                     "message": format!("Error getting response from khalti: {}", e)
+    //                 }));
+    //         }
+    //     };
 
-    println!("----");
-    println!("response: {response:?}");
-    println!("-----");
+    // println!("----");
+    // println!("response: {response:?}");
+    // println!("-----");
 
-    HttpResponse::Ok().status(StatusCode::OK).json(response)
+    //HttpResponse::Ok().status(StatusCode::OK).json(response)
+
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(serde_json::json!({
+          "pidx": "cYqZsuXqBo5nsPHHG5Fibk",
+          "paymentUrl": "https://test-pay.khalti.com/?pidx=cYqZsuXqBo5nsPHHG5Fibk",
+          "expiresAt": "2024-08-04T10:33:56.423485+05:45",
+          "expiresIn": 1800
+        }))
 }
