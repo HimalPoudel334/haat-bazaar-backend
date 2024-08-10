@@ -348,7 +348,7 @@ pub async fn get(
         net_amount: invoice.net_amount(),
         order_id: order.get_uuid().to_owned(),
         customer_id: customer.get_uuid().to_owned(),
-        customer_name: customer.get_name().to_owned(),
+        customer_name: customer.get_full_name().to_owned(),
         payment_id: payment.get_uuid().to_owned(),
         invoice_items: inv_items,
     };

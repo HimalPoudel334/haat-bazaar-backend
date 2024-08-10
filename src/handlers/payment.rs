@@ -364,7 +364,7 @@ async fn verify_transaction(
 //khalti payment integration
 #[post("/payment")]
 pub async fn khalti_payment_get_pidx(
-    //order_json: web::Json<OrderCreate>,
+    order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
@@ -374,87 +374,37 @@ pub async fn khalti_payment_get_pidx(
 
     println!("Hit by android");
 
-    //get a pooled connection from db
-    // let conn = &mut get_conn(&pool);
+    // get a pooled connection from db
+    let conn = &mut get_conn(&pool);
 
-    // let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
-    //     Ok(c) => c,
-    //     Err(http_response) => return http_response,
-    // };
-    //
-    // let customer: CustomerModel = match customers
-    //     .filter(uuid.eq(&customer_id))
-    //     .select(CustomerModel::as_select())
-    //     .first(conn)
-    //     .optional()
-    // {
-    //     Ok(Some(c)) => c,
-    //     Ok(None) => {
-    //         return HttpResponse::BadRequest()
-    //             .status(StatusCode::BAD_REQUEST)
-    //             .json(serde_json::json!({"message": "Customer not found"}))
-    //     }
-    //     Err(_) => {
-    //         return HttpResponse::BadRequest()
-    //             .status(StatusCode::BAD_REQUEST)
-    //             .json(serde_json::json!({"message": "Ops! something went wrong"}))
-    //     }
-    // };
-    //
+    let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+        Ok(c) => c,
+        Err(http_response) => return http_response,
+    };
 
-    //Create a Khalti payment struct
-    /*let khalti_payment_payload: KhaltiPayment = KhaltiPayment {
-            return_url: "http://0.0.0.0:8080/payments/khalti/payment/".into(),
-            website_url: "http://0.0.0.0:8080/".into(),
-            amount: 1300 * 100, // amount must be in paisa and should be equal to sum of amount breakdown
-            purchase_order_id: "some id".into(), //get from request body
-            purchase_order_name: "some order name".into(),
-            customer_info: CustomerInfo {
-                name: "Sallu bhai".into(),
-                email: "Sallu@bhai.com".into(),
-                phone: "9800000001".into(),
-            },
-            amount_breakdown: Some(
-                [
-                    AmountBreakdown {
-                        label: "some label".into(),
-                        amount: 1000.0.into(),
-                    },
-                    AmountBreakdown {
-                        label: "some label".into(),
-                        amount: 300.0,
-                    },
-                ]
-                .to_vec(),
-            ),
-            product_details: Some(
-                [
-                    ProductDetail {
-                        identity: "some product id1".into(),
-                        name: "some product name1".into(),
-                        total_price: 500.0,
-                        unit_price: 250.0,
-                        quantity: 2,
-                    },
-                    ProductDetail {
-                        identity: "some product id2".into(),
-                        name: "some product name2".into(),
-                        total_price: 500.0,
-                        unit_price: 100.0,
-                        quantity: 5,
-                    },
-                ]
-                .to_vec(),
-            ),
-            merchant_username: "khalti username".into(),
-            merchant_extra: String::from(""),
-        };
-    */
+    let customer: CustomerModel = match customers
+        .filter(uuid.eq(&customer_id))
+        .select(CustomerModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Customer not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
 
     let customer_info = CustomerInfo {
-        name: "Sallu bhai".into(),
-        email: "Sallu@bhai.com".into(),
-        phone: "9800000001".into(),
+        name: customer.get_full_name(),
+        email: customer.get_email().to_owned(),
+        phone: customer.get_phone_number().to_owned(),
     };
 
     let khalti_payment_payload = KhaltiPayment::init(
@@ -548,13 +498,4 @@ pub async fn khalti_payment_get_pidx(
     println!("-----");
 
     HttpResponse::Ok().status(StatusCode::OK).json(response)
-
-    // HttpResponse::Ok()
-    //     .status(StatusCode::OK)
-    //     .json(serde_json::json!({
-    //       "pidx": "cYqZsuXqBo5nsPHHG5Fibk",
-    //       "paymentUrl": "https://test-pay.khalti.com/?pidx=cYqZsuXqBo5nsPHHG5Fibk",
-    //       "expiresAt": "2024-08-04T10:33:56.423485+05:45",
-    //       "expiresIn": 1800
-    //     }))
 }

@@ -21,31 +21,31 @@ impl Customer {
         self.id
     }
 
-    pub fn get_uuid(&self) -> &String {
+    pub fn get_uuid(&self) -> &str {
         &self.uuid
     }
 
-    pub fn get_first_name(&self) -> &String {
+    pub fn get_first_name(&self) -> &str {
         &self.first_name
     }
 
-    pub fn get_last_name(&self) -> &String {
+    pub fn get_last_name(&self) -> &str {
         &self.last_name
     }
 
-    pub fn get_name(&self) -> String {
+    pub fn get_full_name(&self) -> String {
         format!("{} {}", self.first_name, self.last_name)
     }
 
-    pub fn get_phone_number(&self) -> &String {
+    pub fn get_phone_number(&self) -> &str {
         &self.phone_number
     }
 
-    pub fn get_email(&self) -> &String {
+    pub fn get_email(&self) -> &str {
         &self.email
     }
 
-    pub fn get_password(&self) -> &String {
+    pub fn get_password(&self) -> &str {
         &self.password
     }
 }
