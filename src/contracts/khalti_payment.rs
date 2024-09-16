@@ -63,7 +63,7 @@ pub struct ProductDetail {
     identity: String,
     name: String,
     total_price: i64, // in paise
-    quantity: i32,
+    quantity: f64,
     unit_price: i64, // in paise
 }
 
@@ -73,7 +73,7 @@ impl ProductDetail {
         name: String,
         total_price: f64,
         unit_price: f64,
-        quantity: i32,
+        quantity: f64,
     ) -> Self {
         ProductDetail {
             identity,

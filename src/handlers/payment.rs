@@ -407,10 +407,24 @@ pub async fn khalti_payment_get_pidx(
         phone: customer.get_phone_number().to_owned(),
     };
 
+    let product_details = order_json
+        .order_details
+        .iter()
+        .map(|detail| {
+            ProductDetail::new(
+                detail.product_id.to_owned(),
+                "product name".into(),
+                detail.quantity * detail.price,
+                detail.price,
+                detail.quantity,
+            )
+        })
+        .collect::<Vec<ProductDetail>>();
+
     let khalti_payment_payload = KhaltiPayment::init(
         "http://0.0.0.0:8080/payments/khalti/payment/".into(),
         "http://0.0.0.0:8080/".into(),
-        113.0,
+        order_json.total_price,
         "some id".into(),
         "some order name".into(),
         customer_info,
@@ -418,22 +432,7 @@ pub async fn khalti_payment_get_pidx(
             AmountBreakdown::new("some label".into(), 100.0),
             AmountBreakdown::new("some label".into(), 13.0),
         ]),
-        Some(vec![
-            ProductDetail::new(
-                "some product id1".into(),
-                "some product name1".into(),
-                50.0,
-                25.0,
-                2,
-            ),
-            ProductDetail::new(
-                "some product id2".into(),
-                "some product name2".into(),
-                50.0,
-                10.0,
-                5,
-            ),
-        ]),
+        Some(payment_de),
         "khalti username".into(),
         String::from(""),
     );
