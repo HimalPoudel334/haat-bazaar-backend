@@ -432,7 +432,7 @@ pub async fn khalti_payment_get_pidx(
             AmountBreakdown::new("some label".into(), 100.0),
             AmountBreakdown::new("some label".into(), 13.0),
         ]),
-        Some(payment_de),
+        Some(product_details),
         "khalti username".into(),
         String::from(""),
     );
