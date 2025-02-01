@@ -13,11 +13,11 @@ use crate::{
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, CustomerInfo, KhaltiPayment, KhaltiResponse, KhaltiResponseCamelCase,
+            AmountBreakdown, CustomerInfo, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
             ProductDetail,
         },
         order::OrderCreate,
-        payment::{EsewaCallbackResponse, EsewaTransactionResponse, NewPayment, Payment},
+        payment::{EsewaCallbackResponse, EsewaTransactionResponse, KhaltiQueryParams, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -252,7 +252,7 @@ pub async fn get(
         .json(payment_response)
 }
 
-#[post("/payment/confirmation")]
+#[post("/esewa")]
 pub async fn esewa_payment_confirmation(
     req: HttpRequest,
     req_body: web::Json<EsewaCallbackResponse>,
@@ -337,7 +337,7 @@ async fn verify_transaction(
     }
 
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
-
+    
     let url = format!(
         "https://rc.esewa.com.np/mobile/transaction?txnRefId={}",
         txn_ref_id
@@ -362,17 +362,16 @@ async fn verify_transaction(
 }
 
 //khalti payment integration
-#[post("/payment")]
+#[post("/khalti")]
 pub async fn khalti_payment_get_pidx(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
+    println!("Hit by android khalti get pidx");
     use crate::schema::customers;
     use crate::schema::customers::dsl::*;
-
-    println!("Hit by android");
 
     // get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -421,17 +420,19 @@ pub async fn khalti_payment_get_pidx(
         })
         .collect::<Vec<ProductDetail>>();
 
-    let khalti_payment_payload = KhaltiPayment::init(
-        "http://0.0.0.0:8080/payments/khalti/payment/".into(),
-        "http://0.0.0.0:8080/".into(),
+    let khalti_payment_payload = KhaltiPaymentPayload::create(
+        "http://10.0.2.2:8080/payments/khalti/payment/confirmation".into(), //supply a url that can be accessed from anywhere
+        "http://10.0.2.2:8080".into(),
         order_json.total_price,
         "some id".into(),
         "some order name".into(),
         customer_info,
-        Some(vec![
-            AmountBreakdown::new("some label".into(), 100.0),
-            AmountBreakdown::new("some label".into(), 13.0),
-        ]),
+        Some(
+            vec![
+                AmountBreakdown::new("Delivery Charge".into(), order_json.delivery_charge),
+                AmountBreakdown::new("Product Charge".into(), order_json.total_price - order_json.delivery_charge)
+            ]
+        ),
         Some(product_details),
         "khalti username".into(),
         String::from(""),
@@ -439,6 +440,9 @@ pub async fn khalti_payment_get_pidx(
 
     println!("khalti_payment_payload: {khalti_payment_payload:?}");
 
+    HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json! ({"payload": khalti_payment_payload}))
+
+    /*
     let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
 
     let response_result = client
@@ -468,6 +472,7 @@ pub async fn khalti_payment_get_pidx(
             },
             _ => match res.json::<serde_json::Value>().await {
                 Ok(v) => {
+                    println!("response: {v}");
                     return HttpResponse::Unauthorized()
                         .status(StatusCode::UNAUTHORIZED)
                         .json(v)
@@ -497,4 +502,75 @@ pub async fn khalti_payment_get_pidx(
     println!("-----");
 
     HttpResponse::Ok().status(StatusCode::OK).json(response)
+    */
+}
+
+#[get("/khalti/confirmation")]
+pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>, client: web::Data<Client>, app_config: web::Data<ApplicationConfiguration>) -> impl Responder {
+    println!("Hit by khalti confirmation");
+
+   //hit khalti lookup api for payment confirmation
+    let khalti_url = "https://a.khalti.com/api/v2/epayment/lookup";
+
+    let data = serde_json::json!({
+        "pidx": payload.pidx
+    });
+
+    let khalti_response_result = client
+        .post(khalti_url)
+        .header(
+            AUTHORIZATION,
+            &format!("key {}", &app_config.khalti_live_secret_key),
+        )
+        .header(CONTENT_TYPE, "application/json")
+        .timeout(Duration::from_secs(10))
+        .json(&data)
+        .send()
+        .await;
+
+    match khalti_response_result {
+        Ok(res) => match res.status() {
+            reqwest::StatusCode::OK => match res.json::<serde_json::Value>().await {
+                Ok(v) => {
+                    println!("confirmation response: {v}");
+                    return HttpResponse::Ok()
+                        .status(StatusCode::OK)
+                        .json(v)
+                }
+                Err(er) => {
+                    eprintln!("{er}");
+                    return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({
+                            "message": format!("Error parsing response from khalti: {}", er)
+                        }));
+                }
+            },
+            _ => match res.json::<serde_json::Value>().await {
+                Ok(v) => {
+                    println!("response: {v}");
+                    return HttpResponse::Unauthorized()
+                        .status(StatusCode::UNAUTHORIZED)
+                        .json(v)
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({
+                            "message": format!("Error parsing error response from khalti: {}", e)
+                        }));
+                }
+            },
+        },
+        Err(e) => {
+            eprintln!("{e}");
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({
+                    "message": format!("Error getting response from khalti: {}", e)
+                }));
+        }
+    }
+
 }

@@ -86,7 +86,7 @@ impl ProductDetail {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct KhaltiPayment {
+pub struct KhaltiPaymentPayload {
     return_url: String,
     website_url: String,
     amount: i64, // in paise
@@ -99,8 +99,8 @@ pub struct KhaltiPayment {
     merchant_extra: String,
 }
 
-impl KhaltiPayment {
-    pub fn init(
+impl KhaltiPaymentPayload {
+    pub fn create(
         return_url: String,
         website_url: String,
         amount: f64, // in rupees

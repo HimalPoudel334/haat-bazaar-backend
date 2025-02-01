@@ -61,3 +61,18 @@ pub struct EsewaTransactionResponse {
     pub message: EsewaMessage,
     pub transaction_details: EsewaTransactionDetails,
 }
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KhaltiQueryParams {
+    pub pidx: String,
+    pub txn_id: String,
+    pub amount: String,
+    pub total_amount: String,
+    pub status: String,
+    pub mobile: String,
+    pub tidx: String,
+    pub purchase_order_id: String,
+    pub purchase_order_name: String,
+    pub transaction_id: String,
+}

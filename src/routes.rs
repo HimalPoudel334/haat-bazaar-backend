@@ -56,8 +56,9 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/payments")
             .service(payment::get)
             .service(payment::create)
-            .service(web::scope("/khalti").service(payment::khalti_payment_get_pidx))
-            .service(web::scope("/esewa").service(payment::esewa_payment_confirmation)),
+            .service(payment::esewa_payment_confirmation)
+            .service(payment::khalti_payment_get_pidx)
+            .service(payment::khalti_payment_confirmation),
     )
     .service(
         web::scope("/invoices")
