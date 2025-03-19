@@ -356,6 +356,7 @@ pub async fn upload_product_images(
     app_config: web::Data<ApplicationConfiguration>,
     MultipartForm(form): MultipartForm<UploadForm>,
 ) -> impl Responder {
+    println!("Upload product images");
     let prod_uuid: String = prod_id.into_inner().0;
 
     //check if the product_id is valid uuid or not before trip to db
@@ -516,7 +517,7 @@ pub async fn get_product_images_list(
                 .json(serde_json::json!({"message": "Ops! something went wrong"}));
         }
     };
-
+    
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"productImages": prod_images}))
