@@ -6,7 +6,7 @@ use crate::contracts::cart::{Cart, NewCart, UpdateCartQuantity};
 use crate::models::cart::{Cart as CartModel, NewCartItem};
 use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
-    models::{customer::Customer as CustomerModel, product::Product as ProductModel},
+    models::{user::User as UserModel, product::Product as ProductModel},
 };
 
 #[get("/{cust_id}")]
@@ -30,13 +30,13 @@ pub async fn get(
     //maybe not needed
 
     use crate::schema::carts::dsl::*;
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{carts, customers, products};
+    use crate::schema::{carts, users, products};
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(&cust_id.to_string()))
-        .select(CustomerModel::as_select())
+    let customer: UserModel = match users
+        .filter(users::uuid.eq(&cust_id.to_string()))
+        .select(UserModel::as_select())
         .first(&mut get_conn(&pool))
         .optional()
     {
@@ -44,7 +44,7 @@ pub async fn get(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -54,9 +54,9 @@ pub async fn get(
     };
 
     let carts_vec: Vec<Cart> = match carts
-        .inner_join(customers)
+        .inner_join(users)
         .inner_join(products)
-        .filter(carts::customer_id.eq(&customer.get_id()))
+        .filter(carts::user_id.eq(&customer.get_id()))
         .select((
             carts::uuid,
             products::uuid,
@@ -76,7 +76,7 @@ pub async fn get(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -117,15 +117,15 @@ pub async fn create(
     //maybe not needed
 
     use crate::schema::carts::dsl::*;
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{customers, products};
+    use crate::schema::{users, products};
 
     let conn = &mut get_conn(&pool);
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(&cust_id.to_string()))
-        .select(CustomerModel::as_select())
+    let customer: UserModel = match users
+        .filter(users::uuid.eq(&cust_id.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -133,7 +133,7 @@ pub async fn create(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -371,14 +371,14 @@ pub async fn delete_customer_cart(
     //check if customer exists or not
     //maybe not needed
 
-    use crate::schema::customers;
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users;
+    use crate::schema::users::dsl::*;
 
     let conn = &mut get_conn(&pool);
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(&cust_id.to_string()))
-        .select(CustomerModel::as_select())
+    let customer: UserModel = match users
+        .filter(users::uuid.eq(&cust_id.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -386,7 +386,7 @@ pub async fn delete_customer_cart(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -404,7 +404,7 @@ pub async fn delete_customer_cart(
             .json(c),
         Ok(None) => HttpResponse::NotFound()
             .status(StatusCode::NOT_FOUND)
-            .json(serde_json::json!({"message": "Customer not found"})),
+            .json(serde_json::json!({"message": "User not found"})),
 
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)

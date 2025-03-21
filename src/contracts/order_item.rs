@@ -5,7 +5,7 @@ use super::product::Product;
 
 #[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
-pub struct OrderDetails {
+pub struct OrderItems {
     #[serde(rename = "id")]
     pub uuid: String,
     pub product_id: String,
@@ -16,7 +16,7 @@ pub struct OrderDetails {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrderDetailsResponse {
+pub struct OrderItemResponse {
     #[serde(rename = "id")]
     pub uuid: String,
     pub product: Product,
@@ -27,7 +27,7 @@ pub struct OrderDetailsResponse {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct NewOrderDetail {
+pub struct NewOrderItem {
     pub quantity: f64,
     pub product_id: String,
     pub order_id: Option<String>,

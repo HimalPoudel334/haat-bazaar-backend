@@ -4,11 +4,11 @@ use uuid::Uuid;
 
 use crate::base_types::delivery_status::DeliveryStatus;
 
-use super::customer::Customer;
+use super::user::User;
 
 #[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::orders)]
-#[diesel(belongs_to(Customer))]
+#[diesel(belongs_to(User))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Order {
     id: i32,
@@ -19,7 +19,7 @@ pub struct Order {
     delivery_location: String,
     delivery_status: String,
     total_price: f64,
-    customer_id: i32,
+    user_id: i32,
 }
 
 impl Order {
@@ -54,8 +54,8 @@ impl Order {
         &self.delivery_status
     }
 
-    pub fn get_customer_id(&self) -> i32 {
-        self.customer_id
+    pub fn get_user_id(&self) -> i32 {
+        self.user_id
     }
 }
 
@@ -69,12 +69,12 @@ pub struct NewOrder {
     delivery_location: String,
     delivery_status: String,
     total_price: f64,
-    customer_id: i32,
+    user_id: i32,
 }
 
 impl NewOrder {
     pub fn new(
-        customer: &Customer,
+        user: &User,
         created_on: String,
         delivery_charge: f64,
         delivery_status: DeliveryStatus,
@@ -89,7 +89,7 @@ impl NewOrder {
             fulfilled_on: Self::get_delivery_duration(&created_on_clone),
             delivery_location,
             delivery_status: delivery_status.value().to_owned(),
-            customer_id: customer.get_id(),
+            user_id: user.get_id(),
             total_price: order_total + delivery_charge,
         }
     }

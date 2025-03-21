@@ -9,10 +9,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   vat_amount DOUBLE NOT NULL DEFAULT 0,
   net_amount DOUBLE NOT NULL,
   order_id INTEGER NOT NULL,
-  customer_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
   payment_id INTEGER NOT NULL,
 
   FOREIGN KEY(order_id) REFERENCES orders(id),
-  FOREIGN KEY(customer_id) REFERENCES customers(id),
+  FOREIGN KEY(user_id) REFERENCES users(id),
   FOREIGN KEY(payment_id) REFERENCES payments(id)
 );

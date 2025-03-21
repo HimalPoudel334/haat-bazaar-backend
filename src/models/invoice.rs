@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use uuid::Uuid;
 
-use super::{customer::Customer, order::Order, payment::Payment};
+use super::{user::User, order::Order, payment::Payment};
 
 #[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::invoices)]
@@ -18,7 +18,7 @@ pub struct Invoice {
     net_amount: f64,
 
     order_id: i32,
-    customer_id: i32,
+    user_id: i32,
     payment_id: i32,
 }
 
@@ -55,8 +55,8 @@ impl Invoice {
         self.net_amount
     }
 
-    pub fn customer_id(&self) -> i32 {
-        self.customer_id
+    pub fn user_id(&self) -> i32 {
+        self.user_id
     }
 
     pub fn order_id(&self) -> i32 {
@@ -80,7 +80,7 @@ pub struct NewInvoice {
     net_amount: f64,
 
     order_id: i32,
-    customer_id: i32,
+    user_id: i32,
     payment_id: i32,
 }
 
@@ -90,7 +90,7 @@ impl NewInvoice {
         sub_total: f64,
         vat_percent: f64,
         order: &Order,
-        customer: &Customer,
+        user: &User,
         payment: &Payment,
     ) -> Self {
         let vat_amount = sub_total * vat_percent / 100.0;
@@ -103,7 +103,7 @@ impl NewInvoice {
             vat_percent,
             vat_amount,
             net_amount,
-            customer_id: customer.get_id(),
+            user_id: user.get_id(),
             order_id: order.get_id(),
             payment_id: payment.get_id(),
         }

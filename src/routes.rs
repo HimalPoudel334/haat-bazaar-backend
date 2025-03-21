@@ -1,17 +1,17 @@
 use actix_web::web;
 
-use crate::handlers::{cart, category, customer, invoice, order, order_details, payment, product};
+use crate::handlers::{cart, category, user, invoice, order, order_details, payment, product};
 
 pub fn app_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/customers")
-            .service(customer::create)
-            .service(customer::get)
-            .service(customer::get_customer)
-            .service(customer::get_customer_from_phone_number)
-            .service(customer::get_customer_from_email)
-            .service(customer::edit)
-            .service(customer::delete),
+        web::scope("/users")
+            .service(user::create)
+            .service(user::get)
+            .service(user::get_user)
+            .service(user::get_user_from_phone_number)
+            .service(user::get_user_from_email)
+            .service(user::edit)
+            .service(user::delete),
     )
     .service(
         web::scope("/products")
@@ -37,7 +37,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(order::edit)
             .service(order::get_order)
             .service(order::get_orders)
-            .service(order::get_customer_orders)
+            .service(order::get_user_orders)
             .service(order::update_delivery_status),
     )
     .service(

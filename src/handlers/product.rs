@@ -3,7 +3,7 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
-use crate::contracts::product_images::ProductImage;
+use crate::contracts::product_image::ProductImage;
 use crate::models::product_image::{NewProductImage, ProductImage as ProductImageModel};
 use crate::{
     config::ApplicationConfiguration,

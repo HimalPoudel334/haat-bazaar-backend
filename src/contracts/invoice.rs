@@ -15,7 +15,7 @@ pub struct Invoice {
     pub net_amount: f64,
 
     pub order_id: String,
-    pub customer_id: String,
+    pub user_id: String,
     pub payment_id: String,
     pub invoice_items: Vec<InvoiceItem>,
 }
@@ -33,7 +33,7 @@ pub struct InvoiceOnly {
     pub net_amount: f64,
 
     pub order_id: String,
-    pub customer_id: String,
+    pub user_id: String,
     pub payment_id: String,
 }
 
@@ -44,7 +44,7 @@ pub struct NewInvoice {
     pub vat_percent: f64,
 
     pub order_id: String,
-    pub customer_id: String,
+    pub user_id: String,
     pub payment_id: String,
     pub invoice_items: Vec<NewInvoiceItem>,
 }

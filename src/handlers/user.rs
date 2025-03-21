@@ -4,27 +4,26 @@ use uuid::Uuid;
 
 use crate::{
     base_types::{email::Email, phone_number::PhoneNumber},
-    contracts::customer::{Customer, CustomerCreate},
+    contracts::user::{User, UserCreate},
     db::connection::{get_conn, SqliteConnectionPool},
-    models::customer::{Customer as CustomerModel, NewCustomer},
-    utils::password_helper::hash_password,
+    models::user::{User as UserModel, NewUser},
 };
 
 #[get("")]
 pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let customers_vec = customers
-        .select((uuid, first_name, last_name, phone_number, email))
-        .load::<Customer>(conn);
+    let user_vec = users
+        .select((uuid, first_name, last_name, phone_number, email, user_type))
+        .load::<User>(conn);
 
-    match customers_vec {
-        Ok(cust_v) => HttpResponse::Ok()
+    match user_vec {
+        Ok(uv) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(serde_json::json!({"customers": cust_v})),
+            .json(serde_json::json!({"users": uv})),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": e.to_string()})),
@@ -33,12 +32,12 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
 
 #[post("")]
 pub async fn create(
-    customer: web::Json<CustomerCreate>,
+    user: web::Json<UserCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
-    let phone_num: PhoneNumber = match PhoneNumber::from_str(customer.phone_number.to_owned()) {
+    let phone_num: PhoneNumber = match PhoneNumber::from_str(user.phone_number.to_owned()) {
         Ok(phone) => phone,
         Err(e) => {
             return HttpResponse::BadRequest()
@@ -47,7 +46,7 @@ pub async fn create(
         }
     };
 
-    let valid_email: Email = match Email::from_str(customer.email.to_owned()) {
+    let valid_email: Email = match Email::from_str(user.email.to_owned()) {
         Ok(em) => em,
         Err(er) => {
             return HttpResponse::BadRequest()
@@ -59,43 +58,44 @@ pub async fn create(
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    match customers
+    match users
         .filter(
             phone_number
-                .eq(&customer.phone_number)
+                .eq(&user.phone_number)
                 .or(email.eq(&valid_email.get_email())),
         )
-        .select(CustomerModel::as_select())
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
-        Ok(Some(_)) => HttpResponse::Conflict()
-            .status(StatusCode::CONFLICT)
+        Ok(Some(_)) => HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
             .json(serde_json::json!({"message": "Email or Phone number already used"})),
         Ok(None) => {
-            let new_customer = NewCustomer::new(
-                customer.first_name.to_owned(),
-                customer.last_name.to_owned(),
+            let new_user = NewUser::new(
+                user.first_name.to_owned(),
+                user.last_name.to_owned(),
                 phone_num,
                 valid_email.get_email(),
-                hash_password(&customer.password),
+                user.password.to_owned(),
             );
 
-            match diesel::insert_into(customers)
-                .values(&new_customer)
-                .get_result::<CustomerModel>(conn)
+            match diesel::insert_into(users)
+                .values(&new_user)
+                .get_result::<UserModel>(conn)
             {
                 Ok(c) => {
-                    let customer_created: Customer = Customer {
+                    let user_created: User = User {
                         first_name: c.get_first_name().to_owned(),
                         last_name: c.get_last_name().to_owned(),
                         uuid: c.get_uuid().to_owned(),
                         phone_number: c.get_phone_number().to_owned(),
                         email: c.get_email().into(),
+                        user_type: c.get_user_type().to_owned(),
                     };
                     HttpResponse::Ok()
                         .status(StatusCode::OK)
-                        .json(customer_created)
+                        .json(user_created)
                 }
                 Err(e) => HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -109,7 +109,7 @@ pub async fn create(
 }
 
 #[get("/{user_id}")]
-pub async fn get_customer(
+pub async fn get_user(
     user_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
@@ -124,22 +124,22 @@ pub async fn get_customer(
         }
     };
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    match customers
+    match users
         .filter(uuid.eq(uid.to_string()))
-        .select(Customer::as_select())
+        .select(User::as_select())
         .first(conn)
         .optional()
     {
-        Ok(cust) => match cust {
-            Some(c) => HttpResponse::Ok().status(StatusCode::OK).json(c),
+        Ok(user) => match user {
+            Some(u) => HttpResponse::Ok().status(StatusCode::OK).json(u),
             None => HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"})),
+                .json(serde_json::json!({"message": "User not found"})),
         },
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -148,7 +148,7 @@ pub async fn get_customer(
 }
 
 #[get("/phone-number/{phone_num}")]
-pub async fn get_customer_from_phone_number(
+pub async fn get_user_from_phone_number(
     phone_num: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
@@ -163,22 +163,22 @@ pub async fn get_customer_from_phone_number(
         }
     };
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    match customers
+    match users
         .filter(phone_number.eq(&ph_num.get_number()))
-        .select(Customer::as_select())
+        .select(User::as_select())
         .first(conn)
         .optional()
     {
-        Ok(cust) => match cust {
-            Some(c) => HttpResponse::Ok().status(StatusCode::OK).json(c),
+        Ok(user) => match user {
+            Some(u) => HttpResponse::Ok().status(StatusCode::OK).json(u),
             None => HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"})),
+                .json(serde_json::json!({"message": "User not found"})),
         },
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -187,7 +187,7 @@ pub async fn get_customer_from_phone_number(
 }
 
 #[get("/email/{email_str}")]
-pub async fn get_customer_from_email(
+pub async fn get_user_from_email(
     email_str: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
@@ -202,23 +202,23 @@ pub async fn get_customer_from_email(
         }
     };
 
-    use crate::schema::customers;
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users;
+    use crate::schema::users::dsl::*;
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    match customers
-        .filter(customers::email.eq(&valid_email.get_email()))
-        .select(Customer::as_select())
+    match users
+        .filter(users::email.eq(&valid_email.get_email()))
+        .select(User::as_select())
         .first(conn)
         .optional()
     {
-        Ok(cust) => match cust {
-            Some(c) => HttpResponse::Ok().status(StatusCode::OK).json(c),
+        Ok(user) => match user {
+            Some(u) => HttpResponse::Ok().status(StatusCode::OK).json(u),
             None => HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"})),
+                .json(serde_json::json!({"message": "User not found"})),
         },
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -229,7 +229,7 @@ pub async fn get_customer_from_email(
 #[put("/{user_id}")]
 pub async fn edit(
     user_id: web::Path<(String,)>,
-    customer_update: web::Json<Customer>,
+    user_update: web::Json<User>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     let uid: String = user_id.into_inner().0;
@@ -244,7 +244,7 @@ pub async fn edit(
     };
 
     //check if the phone number is valid or not
-    let _ = match PhoneNumber::from_str(customer_update.phone_number.to_owned()) {
+    let _ = match PhoneNumber::from_str(user_update.phone_number.to_owned()) {
         Ok(_) => (),
         Err(e) => {
             return HttpResponse::BadRequest()
@@ -253,21 +253,21 @@ pub async fn edit(
         }
     };
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
     //check if the new phone number is already used or not
-    let customer_from_phone = match customers
-        .filter(phone_number.eq(customer_update.phone_number.to_string()))
-        .select(CustomerModel::as_select())
+    let user_from_phone = match users
+        .filter(phone_number.eq(user_update.phone_number.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
         Ok(cu) => match cu {
             Some(c) => c,
-            None => Default::default(), //return the default Customer struct if not found
+            None => Default::default(), //return the default User struct if not found
         },
         Err(e) => {
             return HttpResponse::InternalServerError()
@@ -276,15 +276,15 @@ pub async fn edit(
         }
     };
 
-    let customer: CustomerModel = match customers
+    let user: UserModel = match users
         .filter(uuid.eq(uid.to_string()))
-        .select(CustomerModel::as_select())
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
         Ok(cu) => match cu {
             Some(c) => {
-                if c == customer_from_phone {
+                if c == user_from_phone {
                     c
                 } else {
                     return HttpResponse::Conflict()
@@ -295,7 +295,7 @@ pub async fn edit(
             None => {
                 return HttpResponse::NotFound()
                     .status(StatusCode::NOT_FOUND)
-                    .json(serde_json::json!({"message": "Customer not found"}));
+                    .json(serde_json::json!({"message": "User not found"}));
             }
         },
         Err(e) => {
@@ -305,17 +305,17 @@ pub async fn edit(
         }
     };
 
-    match diesel::update(&customer)
+    match diesel::update(&user)
         .set((
-            first_name.eq(&customer_update.first_name),
-            last_name.eq(&customer_update.last_name),
-            phone_number.eq(&customer_update.phone_number),
+            first_name.eq(&user_update.first_name),
+            last_name.eq(&user_update.last_name),
+            phone_number.eq(&user_update.phone_number),
         ))
         .execute(conn)
     {
         Ok(_) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(customer_update),
+            .json(user_update),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),

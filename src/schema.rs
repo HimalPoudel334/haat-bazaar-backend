@@ -5,7 +5,7 @@ diesel::table! {
         id -> Integer,
         uuid -> Text,
         product_id -> Integer,
-        customer_id -> Integer,
+        user_id -> Integer,
         quantity -> Double,
         sku -> Text,
         created_on -> Text,
@@ -17,18 +17,6 @@ diesel::table! {
         id -> Integer,
         uuid -> Text,
         name -> Text,
-    }
-}
-
-diesel::table! {
-    customers (id) {
-        id -> Integer,
-        uuid -> Text,
-        first_name -> Text,
-        last_name -> Text,
-        phone_number -> Text,
-        email -> Text,
-        password -> Text,
     }
 }
 
@@ -57,13 +45,13 @@ diesel::table! {
         vat_amount -> Double,
         net_amount -> Double,
         order_id -> Integer,
-        customer_id -> Integer,
+        user_id -> Integer,
         payment_id -> Integer,
     }
 }
 
 diesel::table! {
-    order_details (id) {
+    order_items (id) {
         id -> Integer,
         uuid -> Text,
         product_id -> Integer,
@@ -83,7 +71,7 @@ diesel::table! {
         delivery_location -> Text,
         delivery_status -> Text,
         total_price -> Double,
-        customer_id -> Integer,
+        user_id -> Integer,
     }
 }
 
@@ -94,8 +82,9 @@ diesel::table! {
         pay_date -> Text,
         amount -> Double,
         payment_method -> Text,
-        customer_id -> Integer,
+        user_id -> Integer,
         order_id -> Integer,
+        transaction_id -> Text,
     }
 }
 
@@ -138,18 +127,31 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(carts -> customers (customer_id));
+diesel::table! {
+    users (id) {
+        id -> Integer,
+        uuid -> Text,
+        first_name -> Text,
+        last_name -> Text,
+        phone_number -> Text,
+        email -> Text,
+        password -> Text,
+        user_type -> Text,
+    }
+}
+
 diesel::joinable!(carts -> products (product_id));
+diesel::joinable!(carts -> users (user_id));
 diesel::joinable!(invoice_items -> invoices (invoice_id));
 diesel::joinable!(invoice_items -> products (product_id));
-diesel::joinable!(invoices -> customers (customer_id));
 diesel::joinable!(invoices -> orders (order_id));
 diesel::joinable!(invoices -> payments (payment_id));
-diesel::joinable!(order_details -> orders (order_id));
-diesel::joinable!(order_details -> products (product_id));
-diesel::joinable!(orders -> customers (customer_id));
-diesel::joinable!(payments -> customers (customer_id));
+diesel::joinable!(invoices -> users (user_id));
+diesel::joinable!(order_items -> orders (order_id));
+diesel::joinable!(order_items -> products (product_id));
+diesel::joinable!(orders -> users (user_id));
 diesel::joinable!(payments -> orders (order_id));
+diesel::joinable!(payments -> users (user_id));
 diesel::joinable!(product_images -> products (product_id));
 diesel::joinable!(products -> categories (category_id));
 diesel::joinable!(shipments -> orders (order_id));
@@ -157,13 +159,13 @@ diesel::joinable!(shipments -> orders (order_id));
 diesel::allow_tables_to_appear_in_same_query!(
     carts,
     categories,
-    customers,
     invoice_items,
     invoices,
-    order_details,
+    order_items,
     orders,
     payments,
     product_images,
     products,
     shipments,
+    users,
 );

@@ -1,2 +1,2 @@
 -- This file should undo anything in `up.sql`
-DROP TABLE IF EXISTS customers;
+DROP TABLE IF EXISTS order_items;

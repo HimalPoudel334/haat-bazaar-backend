@@ -9,7 +9,7 @@ use crate::{
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel,
+        user::User as UserModel,
         invoice::{Invoice as InvoiceModel, NewInvoice as NewInvoiceModel},
         invoice_item::NewInvoiceItem as NewInvoiceItemModel,
         order::Order as OrderModel,
@@ -23,7 +23,7 @@ pub async fn create(
     inv_json: web::Json<NewInvoice>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::invoice_items::dsl::*;
     use crate::schema::invoices::dsl::*;
     use crate::schema::orders::dsl::*;
@@ -88,14 +88,14 @@ pub async fn create(
         }
     };
 
-    let customer: CustomerModel = match customers
-        .find(order.get_customer_id())
-        .select(CustomerModel::as_select())
+    let customer: UserModel = match users
+        .find(order.get_user_id())
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
         Ok(Some(c)) => {
-            if c.get_uuid().eq(&inv_json.customer_id) {
+            if c.get_uuid().eq(&inv_json.user_id) {
                 c
             } else {
                 return HttpResponse::BadRequest()
@@ -106,7 +106,7 @@ pub async fn create(
         Ok(None) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -229,7 +229,7 @@ pub async fn get(
 
     let conn = &mut get_conn(&pool);
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::invoice_items::dsl::*;
     use crate::schema::invoices::dsl::*;
     use crate::schema::orders::dsl::*;
@@ -295,9 +295,9 @@ pub async fn get(
         }
     };
 
-    let customer: CustomerModel = match customers
-        .find(invoice.customer_id())
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .find(invoice.user_id())
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -305,7 +305,7 @@ pub async fn get(
         Ok(None) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -347,8 +347,8 @@ pub async fn get(
         vat_amount: invoice.vat_amount(),
         net_amount: invoice.net_amount(),
         order_id: order.get_uuid().to_owned(),
-        customer_id: customer.get_uuid().to_owned(),
-        customer_name: customer.get_full_name().to_owned(),
+        user_id: user.get_uuid().to_owned(),
+        customer_name: user.get_full_name().to_owned(),
         payment_id: payment.get_uuid().to_owned(),
         invoice_items: inv_items,
     };
@@ -359,29 +359,29 @@ pub async fn get(
 #[get("")]
 pub async fn get_all(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     let conn = &mut get_conn(&pool);
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::invoices::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
-    use crate::schema::{customers, invoices, orders, payments};
+    use crate::schema::{users, invoices, orders, payments};
 
     match invoices
-        .inner_join(customers)
+        .inner_join(users)
         .inner_join(orders)
         .inner_join(payments)
         .select((
             invoices::uuid,
             invoice_number,
             invoice_date,
-            customers::first_name
+            users::first_name
                 .concat(" ")
-                .concat(customers::last_name),
+                .concat(users::last_name),
             sub_total,
             vat_percent,
             vat_amount,
             net_amount,
             orders::uuid,
-            customers::uuid,
+            users::uuid,
             payments::uuid,
         ))
         .load::<InvoiceOnly>(conn)

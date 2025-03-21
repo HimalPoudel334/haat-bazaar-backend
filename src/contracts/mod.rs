@@ -1,11 +1,11 @@
 pub mod cart;
 pub mod category;
-pub mod customer;
 pub mod invoice;
 pub mod invoice_item;
 pub mod khalti_payment;
 pub mod order;
-pub mod order_details;
+pub mod order_item;
 pub mod payment;
 pub mod product;
-pub mod product_images;
+pub mod product_image;
+pub mod user;

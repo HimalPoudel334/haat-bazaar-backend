@@ -1,3 +1,11 @@
+use diesel::{prelude::{Identifiable, Insertable, Queryable}, Selectable};
+use uuid::Uuid;
+
+use crate::{base_types::phone_number::PhoneNumber, utils::password_helper::hash_password};
+
+#[derive(Default, PartialEq, Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::users)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct User {
     id: i32,
     uuid: String,
@@ -33,4 +41,82 @@ impl User {
             user_type : Self::USERTYPE_CUSTOMER.to_string(),
         }
     }
+
+    pub fn get_id(&self) -> i32 {
+        self.id
+    }
+
+    pub fn get_uuid(&self) -> &str {
+        &self.uuid
+    }
+
+    pub fn get_first_name(&self) -> &str {
+        &self.first_name
+    }
+
+    pub fn get_last_name(&self) -> &str {
+        &self.last_name
+    }
+
+    pub fn get_full_name(&self) -> String {
+        format!("{} {}", self.first_name, self.last_name)
+    }
+
+    pub fn get_phone_number(&self) -> &str {
+        &self.phone_number
+    }
+
+    pub fn get_email(&self) -> &str {
+        &self.email
+    }
+
+    pub fn get_password(&self) -> &str {
+        &self.password
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.user_type == Self::USERTYPE_ADMIN
+    }
+
+    pub fn get_user_type(&self) -> &str {
+        &self.user_type
+    }
 }
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::users)]
+
+pub struct NewUser {
+    uuid: String,
+    first_name: String,
+    last_name: String,
+    phone_number: String,
+    email: String,
+    password: String,
+    user_type: String,
+}
+
+impl NewUser {
+    pub const USERTYPE_ADMIN: &'static str = "Admin";
+    pub const USERTYPE_CUSTOMER: &'static str = "Customer";
+    
+    pub fn new(
+        first_name: String,
+        last_name: String,
+        phone_number: PhoneNumber,
+        email: String,
+        password: String,
+    ) -> Self {
+        Self {
+            uuid: Uuid::new_v4().to_string(),
+            first_name,
+            last_name,
+            phone_number: phone_number.get_number(),
+            email,
+            password: hash_password(&password),
+            user_type : Self::USERTYPE_CUSTOMER.to_string(),
+        }
+    }
+}
+
+

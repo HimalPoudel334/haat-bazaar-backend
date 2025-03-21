@@ -1,3 +1,5 @@
+//this api should be hit by payment providers
+
 use std::time::Duration;
 
 use ::uuid::Uuid;
@@ -13,7 +15,7 @@ use crate::{
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, CustomerInfo, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
+            AmountBreakdown, UserInfo, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
             ProductDetail,
         },
         order::OrderCreate,
@@ -21,7 +23,7 @@ use crate::{
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel,
+        user::User as UserModel,
         order::Order as OrderModel,
         payment::{NewPayment as NewPaymentModel, Payment as PaymentModel},
     },
@@ -37,10 +39,10 @@ pub async fn create(
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
-    use crate::schema::{customers, orders};
+    use crate::schema::{users, orders};
 
     //first check if the uuids are valid or not
     let o_uuid: Uuid = match Uuid::parse_str(&payment_json.order_id) {
@@ -52,12 +54,12 @@ pub async fn create(
         }
     };
 
-    let c_uuid: Uuid = match Uuid::parse_str(&payment_json.customer_id) {
+    let c_uuid: Uuid = match Uuid::parse_str(&payment_json.user_id) {
         Ok(c) => c,
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid customer id"}))
+                .json(serde_json::json!({"message": "Invalid user id"}))
         }
     };
 
@@ -71,7 +73,7 @@ pub async fn create(
         }
     };
 
-    //check if the order_id and customer_id are valid or not
+    //check if the order_id and user_id are valid or not
     let order: OrderModel = match orders
         .filter(orders::uuid.eq(&o_uuid.to_string()))
         .select(OrderModel::as_select())
@@ -91,9 +93,9 @@ pub async fn create(
         }
     };
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(&c_uuid.to_string()))
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .filter(users::uuid.eq(&c_uuid.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -110,14 +112,14 @@ pub async fn create(
         }
     };
 
-    //check if customer id from order and customer id from payment are same
-    if order.get_customer_id() != customer.get_id() {
+    //check if user id from order and user id from payment are same
+    if order.get_user_id() != user.get_id() {
         return HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Customers do not match"}));
+            .json(serde_json::json!({"message": "Users do not match"}));
     }
 
-    //if the customer and order are valid then check if the order total and payment amount matches
+    //if the user and order are valid then check if the order total and payment amount matches
     if order.get_total_price() != payment_json.amount {
         return HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
@@ -128,7 +130,8 @@ pub async fn create(
     //if everything went good then create a new payment
     let payment: NewPaymentModel = NewPaymentModel::new(
         &pay_method,
-        &customer,
+        &String::from("test transaction id"),
+        &user,
         &order,
         &payment_json.pay_date,
         payment_json.amount,
@@ -143,7 +146,7 @@ pub async fn create(
                 uuid: p.get_uuid().to_owned(),
                 payment_method: p.get_payment_method().to_owned(),
                 pay_date: p.get_pay_date().to_owned(),
-                customer_id: customer.get_uuid().to_owned(),
+                user_id: user.get_uuid().to_owned(),
                 order_id: order.get_uuid().to_owned(),
                 amount: p.get_amount(),
             };
@@ -173,7 +176,7 @@ pub async fn get(
     };
 
     //check if payment exists or not
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
     use crate::schema::{orders, payments};
@@ -219,9 +222,9 @@ pub async fn get(
         }
     };
 
-    let customer: CustomerModel = match customers
-        .find(payment.get_customer_id())
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .find(payment.get_user_id())
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -229,7 +232,7 @@ pub async fn get(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Invalid customer id for payment"}))
+                .json(serde_json::json!({"message": "Invalid user id for payment"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -240,7 +243,7 @@ pub async fn get(
 
     let payment_response: Payment = Payment {
         uuid: payment.get_uuid().to_owned(),
-        customer_id: customer.get_uuid().to_owned(),
+        user_id: user.get_uuid().to_owned(),
         order_id: order.get_uuid().to_owned(),
         pay_date: payment.get_pay_date().to_owned(),
         amount: payment.get_amount(),
@@ -370,20 +373,19 @@ pub async fn khalti_payment_get_pidx(
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     println!("Hit by android khalti get pidx");
-    use crate::schema::customers;
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
 
     // get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let customer_id: String = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+    let user_id: String = match utils::uuid_validator::validate_uuid(&order_json.user_id) {
         Ok(c) => c,
         Err(http_response) => return http_response,
     };
 
-    let customer: CustomerModel = match customers
-        .filter(uuid.eq(&customer_id))
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .filter(uuid.eq(&user_id))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -391,7 +393,7 @@ pub async fn khalti_payment_get_pidx(
         Ok(None) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Customer not found"}))
+                .json(serde_json::json!({"message": "User not found"}))
         }
         Err(_) => {
             return HttpResponse::BadRequest()
@@ -400,22 +402,22 @@ pub async fn khalti_payment_get_pidx(
         }
     };
 
-    let customer_info = CustomerInfo {
-        name: customer.get_full_name(),
-        email: customer.get_email().to_owned(),
-        phone: customer.get_phone_number().to_owned(),
+    let user_info = UserInfo {
+        name: user.get_full_name(),
+        email: user.get_email().to_owned(),
+        phone: user.get_phone_number().to_owned(),
     };
 
     let product_details = order_json
-        .order_details
+        .order_items
         .iter()
-        .map(|detail| {
+        .map(|item| {
             ProductDetail::new(
-                detail.product_id.to_owned(),
+                item.product_id.to_owned(),
                 "product name".into(),
-                detail.quantity * detail.price,
-                detail.price,
-                detail.quantity,
+                item.quantity * item.price,
+                item.price,
+                item.quantity,
             )
         })
         .collect::<Vec<ProductDetail>>();
@@ -426,7 +428,7 @@ pub async fn khalti_payment_get_pidx(
         order_json.total_price,
         "some id".into(),
         "some order name".into(),
-        customer_info,
+        user_info,
         Some(
             vec![
                 AmountBreakdown::new("Delivery Charge".into(), order_json.delivery_charge),

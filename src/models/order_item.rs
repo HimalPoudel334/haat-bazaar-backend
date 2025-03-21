@@ -4,10 +4,10 @@ use uuid::Uuid;
 use super::{order::Order, product::Product};
 
 #[derive(Queryable, Selectable, Associations, Identifiable)]
-#[diesel(table_name = crate::schema::order_details)]
+#[diesel(table_name = crate::schema::order_items)]
 #[diesel(belongs_to(Order))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct OrderDetail {
+pub struct OrderItem {
     id: i32,
     uuid: String,
     quantity: f64,
@@ -16,7 +16,7 @@ pub struct OrderDetail {
     price: f64,
 }
 
-impl OrderDetail {
+impl OrderItem {
     pub fn get_id(&self) -> i32 {
         self.id
     }
@@ -43,8 +43,8 @@ impl OrderDetail {
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = crate::schema::order_details)]
-pub struct NewOrderDetail {
+#[diesel(table_name = crate::schema::order_items)]
+pub struct NewOrderItem {
     uuid: String,
     quantity: f64,
     product_id: i32,
@@ -52,7 +52,7 @@ pub struct NewOrderDetail {
     price: f64,
 }
 
-impl NewOrderDetail {
+impl NewOrderItem {
     pub fn new(quantity: f64, product: &Product, order: &Order) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),

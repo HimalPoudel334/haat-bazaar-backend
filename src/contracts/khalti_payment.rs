@@ -37,7 +37,7 @@ pub struct ProductDetail {
 }*/
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct CustomerInfo {
+pub struct UserInfo {
     pub name: String,
     pub email: String,
     pub phone: String,
@@ -92,7 +92,7 @@ pub struct KhaltiPaymentPayload {
     amount: i64, // in paise
     purchase_order_id: String,
     purchase_order_name: String,
-    customer_info: CustomerInfo,
+    customer_info: UserInfo,
     amount_breakdown: Option<Vec<AmountBreakdown>>,
     product_details: Option<Vec<ProductDetail>>,
     merchant_username: String,
@@ -106,7 +106,7 @@ impl KhaltiPaymentPayload {
         amount: f64, // in rupees
         purchase_order_id: String,
         purchase_order_name: String,
-        customer_info: CustomerInfo,
+        customer_info: UserInfo,
         amount_breakdown: Option<Vec<AmountBreakdown>>,
         product_details: Option<Vec<ProductDetail>>,
         merchant_username: String,

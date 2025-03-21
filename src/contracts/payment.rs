@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Payment {
     pub uuid: String,
     pub payment_method: String,
-    pub customer_id: String,
+    pub user_id: String,
     pub order_id: String,
     pub pay_date: String,
     pub amount: f64,
@@ -15,7 +15,7 @@ pub struct Payment {
 #[serde(rename_all = "camelCase")]
 pub struct NewPayment {
     pub payment_method: String,
-    pub customer_id: String,
+    pub user_id: String,
     pub order_id: String,
     pub pay_date: String,
     pub amount: f64,

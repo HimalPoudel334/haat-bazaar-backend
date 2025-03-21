@@ -1,10 +1,9 @@
 pub mod cart;
 pub mod category;
-pub mod customer;
 pub mod invoice;
 pub mod invoice_item;
 pub mod order;
-pub mod order_detail;
+pub mod order_item;
 pub mod payment;
 pub mod product;
 pub mod product_image;

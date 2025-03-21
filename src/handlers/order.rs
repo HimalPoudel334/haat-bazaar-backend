@@ -5,14 +5,14 @@ use diesel::prelude::*;
 use crate::{
     base_types::delivery_status::DeliveryStatus,
     contracts::order::{
-        CategoryResponse, CustomerOrderResponse, CustomerResponse, Order, OrderCreate,
+        CategoryResponse, UserOrderResponse, UserResponse, Order, OrderCreate,
         OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        customer::Customer as CustomerModel,
+        user::User as UserModel,
         order::{NewOrder, Order as OrderModel},
-        order_detail::NewOrderDetail as NewOrderDetailModel,
+        order_item::NewOrderItem as NewOrderItemModel,
         product::Product as ProductModel,
     },
     utils::{self, uuid_validator::DatabaseErrorInfo},
@@ -24,11 +24,11 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     let conn = &mut get_conn(&pool);
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, customers, order_details, orders, products};
+    use crate::schema::{categories, users, order_items, orders, products};
 
     type OrderTuple = (
         String,
@@ -38,7 +38,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         String,
         String,
         f64,
-        (String, String, String, String, String),
+        (String, String, String, String, String, String),
         (
             String,
             f64,
@@ -56,9 +56,9 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     );
 
     let orders_vec = orders
-        .inner_join(customers.on(customer_id.eq(customers::id)))
-        .inner_join(order_details.on(order_id.eq(orders::id)))
-        .inner_join(products.on(order_details::product_id.eq(products::id)))
+        .inner_join(users.on(user_id.eq(users::id)))
+        .inner_join(order_items.on(order_id.eq(orders::id)))
+        .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
         .select((
             orders::uuid,
@@ -69,16 +69,17 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
             orders::delivery_status,
             orders::total_price,
             (
-                customers::uuid,
-                customers::first_name,
-                customers::last_name,
-                customers::phone_number,
-                customers::email
+                users::uuid,
+                users::first_name,
+                users::last_name,
+                users::phone_number,
+                users::email,
+                users::user_type
             ),
             (
-                order_details::uuid,
-                order_details::quantity,
-                order_details::price,
+                order_items::uuid,
+                order_items::quantity,
+                order_items::price,
                 (
                     products::uuid,
                     products::name,
@@ -101,7 +102,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     //     order_delivery_location,
     //     order_delivery_status,
     //     order_total_price,
-    //     (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
+    //     (user_uuid, user_first_name, user_last_name, user_phone_number, user_email),
     //     (
     //         order_item_uuid,
     //         order_item_quantity,
@@ -125,12 +126,12 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     //         delivery_location: order_delivery_location,
     //         delivery_status: order_delivery_status,
     //         total_price: order_total_price,
-    //         customer: CustomerResponse {
-    //             uuid: customer_uuid,
-    //             first_name: customer_first_name,
-    //             last_name: customer_last_name,
-    //             phone_number: customer_phone_number,
-    //             email: customer_email
+    //         user: UserResponse {
+    //             uuid: user_uuid,
+    //             first_name: user_first_name,
+    //             last_name: user_last_name,
+    //             phone_number: user_phone_number,
+    //             email: user_email
     //         },
     //         order_items: vec![OrderItemResponse {
     //             uuid: order_item_uuid,
@@ -165,7 +166,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
-                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
+                (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
                     order_item_quantity,
@@ -189,12 +190,13 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                     delivery_location: order_delivery_location,
                     delivery_status: order_delivery_status,
                     total_price: order_total_price,
-                    customer: CustomerResponse {
-                        uuid: customer_uuid,
-                        first_name: customer_first_name,
-                        last_name: customer_last_name,
-                        phone_number: customer_phone_number,
-                        email: customer_email
+                    customer: UserResponse {
+                        uuid: user_uuid,
+                        first_name: user_first_name,
+                        last_name: user_last_name,
+                        phone_number: user_phone_number,
+                        email: user_email,
+                        user_type : utype
                     },
                     order_items: vec![OrderItemResponse {
                         uuid: order_item_uuid,
@@ -241,11 +243,11 @@ pub async fn get_order(
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, customers, order_details, orders, products};
+    use crate::schema::{categories, users, order_items, orders, products};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -258,7 +260,7 @@ pub async fn get_order(
         String,
         String,
         f64,
-        (String, String, String, String, String),
+        (String, String, String, String, String, String),
         (
             String,
             f64,
@@ -276,9 +278,9 @@ pub async fn get_order(
     );
 
     match orders
-        .inner_join(customers.on(customer_id.eq(customers::id)))
-        .inner_join(order_details.on(order_id.eq(orders::id)))
-        .inner_join(products.on(order_details::product_id.eq(products::id)))
+        .inner_join(users.on(user_id.eq(users::id)))
+        .inner_join(order_items.on(order_id.eq(orders::id)))
+        .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
         .filter(orders::uuid.eq(&ord_id.to_string()))
         .select((
@@ -290,16 +292,17 @@ pub async fn get_order(
             orders::delivery_status,
             orders::total_price,
             (
-                customers::uuid,
-                customers::first_name,
-                customers::last_name,
-                customers::phone_number,
-                customers::email
+                users::uuid,
+                users::first_name,
+                users::last_name,
+                users::phone_number,
+                users::email,
+                users::user_type
             ),
             (
-                order_details::uuid,
-                order_details::quantity,
-                order_details::price,
+                order_items::uuid,
+                order_items::quantity,
+                order_items::price,
                 (
                     products::uuid,
                     products::name,
@@ -323,7 +326,7 @@ pub async fn get_order(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
-                (customer_uuid, customer_first_name, customer_last_name, customer_phone_number, customer_email),
+                (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
                     order_item_quantity,
@@ -347,12 +350,13 @@ pub async fn get_order(
                 delivery_location: order_delivery_location,
                 delivery_status: order_delivery_status,
                 total_price: order_total_price,
-                customer: CustomerResponse {
-                    uuid: customer_uuid,
-                    first_name: customer_first_name,
-                    last_name: customer_last_name,
-                    phone_number: customer_phone_number,
-                    email: customer_email
+                customer: UserResponse {
+                    uuid: user_uuid,
+                    first_name: user_first_name,
+                    last_name: user_last_name,
+                    phone_number: user_phone_number,
+                    email: user_email,
+                    user_type : utype
                 },
                 order_items: vec![OrderItemResponse {
                     uuid: order_item_uuid,
@@ -383,37 +387,37 @@ pub async fn get_order(
     }
 }
 
-#[get("/customer/{cust_id}")]
-pub async fn get_customer_orders(
+#[get("/user/{cust_id}")]
+pub async fn get_user_orders(
     cust_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     let cust_id: String = cust_id.into_inner().0;
 
-    //first validate the customer exists or not
-    //before that lets check whether the provided customer id is a valid guid or not
+    //first validate the user exists or not
+    //before that lets check whether the provided user id is a valid guid or not
     let cust_id: Uuid = match Uuid::parse_str(&cust_id) {
         Ok(c) => c,
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid customer id"}));
+                .json(serde_json::json!({"message": "Invalid user id"}));
         }
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, customers, order_details, orders, products};
+    use crate::schema::{categories, users, order_items, orders, products};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    //find the customer for the provided customer id
-    let cust: CustomerModel = match customers
-        .filter(customers::uuid.eq(cust_id.to_string()))
-        .select(CustomerModel::as_select())
+    //find the user for the provided user id
+    let cust: UserModel = match users
+        .filter(users::uuid.eq(cust_id.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -421,7 +425,7 @@ pub async fn get_customer_orders(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}));
+                .json(serde_json::json!({"message": "User not found"}));
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -455,8 +459,8 @@ pub async fn get_customer_orders(
     );
 
     match OrderModel::belonging_to(&cust)
-            .inner_join(order_details.on(order_id.eq(orders::id)))
-            .inner_join(products.on(order_details::product_id.eq(products::id)))
+            .inner_join(order_items.on(order_id.eq(orders::id)))
+            .inner_join(products.on(order_items::product_id.eq(products::id)))
             .inner_join(categories.on(products::category_id.eq(categories::id)))
             .select((
                 orders::uuid,
@@ -467,9 +471,9 @@ pub async fn get_customer_orders(
                 orders::delivery_status,
                 orders::total_price,
                 (
-                    order_details::uuid,
-                    order_details::quantity,
-                    order_details::price,
+                    order_items::uuid,
+                    order_items::quantity,
+                    order_items::price,
                     (
                         products::uuid,
                         products::name,
@@ -484,7 +488,7 @@ pub async fn get_customer_orders(
             .load::<OrderTuple>(conn)
             .optional() {
                 Ok(Some(ords)) => {
-                    let customer_orders: Vec<CustomerOrderResponse> = ords.into_iter().map(
+                    let user_orders: Vec<UserOrderResponse> = ords.into_iter().map(
                         |(
                             order_uuid,
                             order_created_on,
@@ -508,7 +512,7 @@ pub async fn get_customer_orders(
                                 ),
                             ),
                         )| {
-                            CustomerOrderResponse {
+                            UserOrderResponse {
                                 uuid: order_uuid,
                                 created_on: order_created_on,
                                 fulfilled_on: order_fulfilled_on,
@@ -536,14 +540,14 @@ pub async fn get_customer_orders(
                             }
                         },
                     )
-                    .collect::<Vec<CustomerOrderResponse>>();
-                HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"orders": customer_orders}))
+                    .collect::<Vec<UserOrderResponse>>();
+                HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"orders": user_orders}))
             
                 },
                     Ok(None) => {
                         return HttpResponse::NotFound()
                             .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Order not found. Looks customer hasn't ordered anything yet"}))
+                            .json(serde_json::json!({"message": "Order not found. Looks user hasn't ordered anything yet"}))
                     }
                     Err(_) => {
                         return HttpResponse::InternalServerError()
@@ -558,21 +562,21 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    // Validate the customer UUID
-    let customer_uuid = match utils::uuid_validator::validate_uuid(&order_json.customer_id) {
+    // Validate the user UUID
+    let user_uuid = match utils::uuid_validator::validate_uuid(&order_json.user_id) {
         Ok(uid) => uid,
         Err(e) => return e,
     };
 
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{customers, products};
+    use crate::schema::{users, products};
 
-    // Validate customer existence
+    // Validate user existence
     let mut order_total: f64 = 0.0;
-    (&order_json.order_details).into_iter().for_each(|od| {
+    (&order_json.order_items).into_iter().for_each(|od| {
         order_total += od.price;
     });
 
@@ -586,9 +590,9 @@ pub async fn create(
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(customer_uuid.to_string()))
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .filter(users::uuid.eq(user_uuid.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -596,7 +600,7 @@ pub async fn create(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}));
+                .json(serde_json::json!({"message": "User not found"}));
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -607,7 +611,7 @@ pub async fn create(
 
     // Create a new order
     let new_order = NewOrder::new(
-        &customer,
+        &user,
         order_json.created_on.to_owned(),
         order_json.delivery_charge,
         DeliveryStatus::Pending,
@@ -621,7 +625,7 @@ pub async fn create(
             .values(&new_order)
             .get_result(conn)?;
 
-        for order_detail in &order_json.order_details {
+        for order_detail in &order_json.order_items {
             let product: ProductModel = products
                 .filter(products::uuid.eq(&order_detail.product_id))
                 .select(ProductModel::as_select())
@@ -636,10 +640,10 @@ pub async fn create(
                 ));
             }
 
-            let od: NewOrderDetailModel =
-                NewOrderDetailModel::new(order_detail.quantity, &product, &order);
+            let od: NewOrderItemModel =
+                NewOrderItemModel::new(order_detail.quantity, &product, &order);
 
-            diesel::insert_into(order_details)
+            diesel::insert_into(order_items)
                 .values(&od)
                 .execute(conn)?;
 
@@ -650,7 +654,7 @@ pub async fn create(
         }
 
         let order_vm: Order = Order {
-            customer_id: customer_uuid.to_string(),
+            user_id: user_uuid.to_string(),
             created_on: order.get_created_on().to_owned(),
             fulfilled_on: order.get_fulfilled_on().to_owned(),
             total_price: order.get_total_price(),
@@ -684,25 +688,25 @@ pub async fn create_backup(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    //first validate the customer exists or not
-    //before that lets check whether the provided customer id is a valid guid or not
-    let customer_uuid: Uuid = match Uuid::parse_str(&order_json.customer_id) {
+    //first validate the user exists or not
+    //before that lets check whether the provided user id is a valid guid or not
+    let user_uuid: Uuid = match Uuid::parse_str(&order_json.user_id) {
         Ok(c) => c,
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid customer id"}));
+                .json(serde_json::json!({"message": "Invalid user id"}));
         }
     };
 
-    use crate::schema::customers::dsl::*;
-    use crate::schema::order_details::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{customers, products};
+    use crate::schema::{users, products};
 
     let mut order_total: f64 = 0.0;
-    (&order_json.order_details).into_iter().for_each(|od| {
+    (&order_json.order_items).into_iter().for_each(|od| {
         order_total += od.price;
     });
 
@@ -715,9 +719,9 @@ pub async fn create_backup(
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(customer_uuid.to_string()))
-        .select(CustomerModel::as_select())
+    let user: UserModel = match users
+        .filter(users::uuid.eq(user_uuid.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -725,7 +729,7 @@ pub async fn create_backup(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}));
+                .json(serde_json::json!({"message": "User not found"}));
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -735,7 +739,7 @@ pub async fn create_backup(
     };
 
     let order: NewOrder = NewOrder::new(
-        &customer,
+        &user,
         order_json.created_on.to_owned(),
         order_json.delivery_charge,
         DeliveryStatus::Pending,
@@ -749,7 +753,7 @@ pub async fn create_backup(
     {
         Ok(o) => {
             //if any one of this failed, then god will help
-            for order_detail in &order_json.order_details {
+            for order_detail in &order_json.order_items {
                 let pr: ProductModel = match products
                     .filter(products::uuid.eq(&order_detail.product_id))
                     .select(ProductModel::as_select())
@@ -775,10 +779,10 @@ pub async fn create_backup(
                             .json(serde_json::json!({"message": "Ordered product quantity is greater than stock"}));
                 }
 
-                let od: NewOrderDetailModel =
-                    NewOrderDetailModel::new(order_detail.quantity, &pr, &o);
+                let od: NewOrderItemModel =
+                    NewOrderItemModel::new(order_detail.quantity, &pr, &o);
 
-                diesel::insert_into(order_details)
+                diesel::insert_into(order_items)
                     .values(&od)
                     .execute(conn)
                     .unwrap();
@@ -791,7 +795,7 @@ pub async fn create_backup(
             }
 
             let order: Order = Order {
-                customer_id: customer_uuid.to_string(),
+                user_id: user_uuid.to_string(),
                 created_on: o.get_created_on().to_owned(),
                 fulfilled_on: o.get_fulfilled_on().to_owned(),
                 total_price: o.get_total_price(),
@@ -818,14 +822,14 @@ pub async fn edit(
 ) -> impl Responder {
     let order_uid: String = order_id.into_inner().0;
 
-    //first validate the customer exists or not
-    //before that lets check whether the provided customer id is a valid guid or not
-    let customer_uuid: Uuid = match Uuid::parse_str(&order_json.customer_id) {
+    //first validate the user exists or not
+    //before that lets check whether the provided user id is a valid guid or not
+    let user_uuid: Uuid = match Uuid::parse_str(&order_json.user_id) {
         Ok(c) => c,
         Err(_) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid customer id"}));
+                .json(serde_json::json!({"message": "Invalid user id"}));
         }
     };
 
@@ -838,9 +842,9 @@ pub async fn edit(
         }
     };
 
-    use crate::schema::customers::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{customers, orders};
+    use crate::schema::{users, orders};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -865,10 +869,10 @@ pub async fn edit(
         }
     };
 
-    //find the customer for the provided customer id
-    let customer: CustomerModel = match customers
-        .filter(customers::uuid.eq(customer_uuid.to_string()))
-        .select(CustomerModel::as_select())
+    //find the user for the provided user id
+    let user: UserModel = match users
+        .filter(users::uuid.eq(user_uuid.to_string()))
+        .select(UserModel::as_select())
         .first(conn)
         .optional()
     {
@@ -876,7 +880,7 @@ pub async fn edit(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Customer not found"}));
+                .json(serde_json::json!({"message": "User not found"}));
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -887,7 +891,7 @@ pub async fn edit(
 
     match diesel::update(&order)
         .set((
-            customer_id.eq(customer.get_id()),
+            user_id.eq(user.get_id()),
             fulfilled_on.eq(&order_json.fulfilled_on),
             delivery_status.eq(&order_json.delivery_status),
             delivery_location.eq(&order_json.delivery_location),
@@ -897,7 +901,7 @@ pub async fn edit(
     {
         Ok(o) => {
             let order: Order = Order {
-                customer_id: customer_uuid.to_string(),
+                user_id: user_uuid.to_string(),
                 created_on: o.get_created_on().to_owned(),
                 fulfilled_on: o.get_fulfilled_on().to_owned(),
                 total_price: o.get_total_price(),
@@ -974,7 +978,7 @@ pub async fn update_delivery_status(
     {
         Ok(o) => {
             let order: Order = Order {
-                customer_id: String::from("N/A"),
+                user_id: String::from("N/A"),
                 created_on: o.get_created_on().to_owned(),
                 fulfilled_on: o.get_fulfilled_on().to_owned(),
                 total_price: o.get_total_price(),

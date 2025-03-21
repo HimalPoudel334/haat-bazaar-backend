@@ -1,7 +1,7 @@
 use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
-use super::order_details::NewOrderDetail;
+use super::order_item::NewOrderItem;
 
 #[derive(Serialize, Deserialize, Selectable, Queryable)]
 #[diesel(table_name = crate::schema::orders)]
@@ -15,7 +15,7 @@ pub struct Order {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
-    pub customer_id: String,
+    pub user_id: String,
 }
 
 /* Order response */
@@ -30,19 +30,20 @@ pub struct OrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
-    pub customer: CustomerResponse,
+    pub customer: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
 }
 
 #[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
-pub struct CustomerResponse {
+pub struct UserResponse {
     #[serde(rename = "id")]
     pub uuid: String,
     pub first_name: String,
     pub last_name: String,
     pub phone_number: String,
     pub email: String,
+    pub user_type: String,
 }
 
 #[derive(Serialize, Queryable)]
@@ -75,7 +76,7 @@ pub struct CategoryResponse {
 
 #[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
-pub struct CustomerOrderResponse {
+pub struct UserOrderResponse {
     #[serde(rename = "id")]
     pub uuid: String,
     pub created_on: String,
@@ -96,8 +97,8 @@ pub struct OrderCreate {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
-    pub customer_id: String,
-    pub order_details: Vec<NewOrderDetail>,
+    pub user_id: String,
+    pub order_items: Vec<NewOrderItem>,
 }
 
 #[derive(Deserialize)]
@@ -107,7 +108,7 @@ pub struct OrderEdit {
     pub delivery_status: String,
     pub delivery_location: String,
     pub total_price: f64,
-    pub customer_id: String,
+    pub user_id: String,
 }
 
 #[derive(Deserialize)]

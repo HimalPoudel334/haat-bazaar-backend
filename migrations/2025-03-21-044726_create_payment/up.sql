@@ -5,9 +5,9 @@ CREATE TABLE IF NOT EXISTS payments (
   pay_date TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   amount DOUBLE NOT NULL,
   payment_method TEXT NOT NULL,
-  customer_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
   order_id INTEGER NOT NULL,
 
-  FOREIGN KEY(customer_id) REFERENCES customers(id),
+  FOREIGN KEY(user_id) REFERENCES users(id),
   FOREIGN KEY(order_id) REFERENCES orders(id)
 );

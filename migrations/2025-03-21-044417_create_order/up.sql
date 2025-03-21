@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS orders (
   delivery_location TEXT NOT NULL,
   delivery_status TEXT NOT NULL,
   total_price DOUBLE NOT NULL,
-  customer_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
 
-  FOREIGN KEY(customer_id) REFERENCES customers(id)
+  FOREIGN KEY(user_id) REFERENCES users(id)
 );
