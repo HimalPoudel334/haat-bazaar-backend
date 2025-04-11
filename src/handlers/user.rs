@@ -72,13 +72,18 @@ pub async fn create(
             .status(StatusCode::BAD_REQUEST)
             .json(serde_json::json!({"message": "Email or Phone number already used"})),
         Ok(None) => {
-            let new_user = NewUser::new(
+            let new_user = match NewUser::new(
                 user.first_name.to_owned(),
                 user.last_name.to_owned(),
                 phone_num,
                 valid_email.get_email(),
                 user.password.to_owned(),
-            );
+            ) {
+                Ok(u) => u,
+                Err(e) => return HttpResponse::InternalServerError()
+                   .status(StatusCode::INTERNAL_SERVER_ERROR)
+                   .json(serde_json::json!({"message": "Something went wrong while creating a new user"})),
+            };
 
             match diesel::insert_into(users)
                 .values(&new_user)

@@ -1,9 +1,14 @@
 use actix_web::web;
 
-use crate::handlers::{cart, category, user, invoice, order, order_details, payment, product};
+use crate::handlers::{auth, cart, category, invoice, order, order_details, payment, product, user};
 
 pub fn app_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(
+    cfg
+    .service(
+        web::scope("/auth")
+            .service(auth::login),
+    )
+    .service(
         web::scope("/users")
             .service(user::create)
             .service(user::get)

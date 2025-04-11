@@ -1,3 +1,4 @@
+use argon2::password_hash::Error;
 use diesel::{prelude::{Identifiable, Insertable, Queryable}, Selectable};
 use uuid::Uuid;
 
@@ -106,16 +107,17 @@ impl NewUser {
         phone_number: PhoneNumber,
         email: String,
         password: String,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        let hashed_password = hash_password(&password)?; // Propagate the error
+        Ok(Self {
             uuid: Uuid::new_v4().to_string(),
             first_name,
             last_name,
             phone_number: phone_number.get_number(),
             email,
-            password: hash_password(&password),
+            password: hashed_password,
             user_type : Self::USERTYPE_CUSTOMER.to_string(),
-        }
+        })
     }
 }
 
