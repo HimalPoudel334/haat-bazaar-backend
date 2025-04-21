@@ -33,9 +33,9 @@ pub async fn login(
         Ok(user) => match user {
             Some(u) => u,
             None => {
-                return HttpResponse::NotFound()
-                    .status(StatusCode::NOT_FOUND)
-                    .json(serde_json::json!({"message": "User not found"}))
+                return HttpResponse::Unauthorized()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .json(serde_json::json!({"message": "Invalid Username or Password"}))
             }
         },
         Err(e) => {
@@ -50,12 +50,13 @@ pub async fn login(
     if !is_valid {
         return HttpResponse::Unauthorized()
             .status(StatusCode::UNAUTHORIZED)
-            .json(serde_json::json!({"message": "Invalid credentials"}));
+            .json(serde_json::json!({"message": "Invalid Username or Password"}));
     }
-
+    println!("User {} logged in successfully", login_user.get_email());
     //jwt token
     let token = create_jwt_token(
         login_user.get_uuid().to_owned(),
+        login_user.get_user_type().to_owned(),
         app_config.jwt_maxage,
         app_config.jwt_secret.to_owned(),
     )
@@ -68,10 +69,11 @@ pub async fn login(
                 user: User {
                     uuid: login_user.get_uuid().to_owned(),
                     first_name: login_user.get_first_name().to_owned(),
-                    last_name: login_user.get_last_name().to_owned(),
+                    last_name: login_user.get_last_name().to_owned(),   
                     phone_number: login_user.get_phone_number().to_owned(),
                     email: login_user.get_email().to_owned(),
                     user_type: login_user.get_user_type().to_owned(),
+                    location: login_user.get_location().map(|s| s.to_owned()),
                 },
             };
             HttpResponse::Ok()
@@ -92,7 +94,7 @@ pub async fn logout(req: HttpRequest) -> impl Responder {
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if auth_str.starts_with("Bearer ") {
-                let token = &auth_str[7..];
+                let _token = &auth_str[7..];
                 // Here you would typically invalidate the token, e.g., by adding it to a blacklist
                 // or removing it from a database/cache if you are storing active tokens.
                 // For now, we'll just simulate this step.

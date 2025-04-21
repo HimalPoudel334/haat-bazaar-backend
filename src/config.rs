@@ -1,5 +1,7 @@
 #[derive(Debug, Clone)]
 pub struct ApplicationConfiguration {
+    pub server_address: String,
+    pub server_port: u16,
     pub database_url: String,
     pub jwt_secret: String,
     pub jwt_expires_in: String,
@@ -16,6 +18,8 @@ pub struct ApplicationConfiguration {
 
 impl ApplicationConfiguration {
     pub fn init() -> Self {
+        let server_address = std::env::var("SERVER_ADDRESS").expect("SERVER_ADDRESS must be set");
+        let server_port = std::env::var("SERVER_PORT").expect("SERVER_PORT must be set");
         let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
         let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
         let jwt_expires_in = std::env::var("JWT_EXPIRED_IN").expect("JWT_EXPIRED_IN must be set");
@@ -38,6 +42,8 @@ impl ApplicationConfiguration {
             std::env::var("KHALTI_LIVE_PUBLIC_KEY").expect("KHALTI_LIVE_PUBLIC_KEY must be set");
 
         Self {
+            server_address,
+            server_port: server_port.parse::<u16>().unwrap(),
             database_url,
             jwt_secret,
             jwt_expires_in,

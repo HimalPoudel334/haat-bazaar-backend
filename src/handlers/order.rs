@@ -576,8 +576,10 @@ pub async fn create(
 
     // Validate user existence
     let mut order_total: f64 = 0.0;
+    let mut order_quantity: f64 = 0.0;
     (&order_json.order_items).into_iter().for_each(|od| {
         order_total += od.price;
+        order_quantity += od.quantity;
     });
 
     if order_total != order_json.total_price - 100.0 {
@@ -616,7 +618,8 @@ pub async fn create(
         order_json.delivery_charge,
         DeliveryStatus::Pending,
         order_json.delivery_location.to_owned(),
-        order_total
+        order_total,
+        order_quantity,
     );
 
     // Insert the order and order details in a transaction
@@ -706,8 +709,10 @@ pub async fn create_backup(
     use crate::schema::{users, products};
 
     let mut order_total: f64 = 0.0;
+    let mut order_quantity: f64 = 0.0;
     (&order_json.order_items).into_iter().for_each(|od| {
         order_total += od.price;
+        order_quantity += od.quantity;
     });
 
     if order_total != order_json.total_price {
@@ -744,7 +749,8 @@ pub async fn create_backup(
         order_json.delivery_charge,
         DeliveryStatus::Pending,
         order_json.delivery_location.to_owned(),
-        order_total
+        order_total,
+        order_quantity
     );
 
     match diesel::insert_into(orders)
