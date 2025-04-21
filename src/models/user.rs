@@ -16,6 +16,7 @@ pub struct User {
     email: String,
     password: String,
     user_type: String,
+    location: Option<String>
 }
 
 impl User {
@@ -30,6 +31,7 @@ impl User {
         phone_number: String,
         email: String,
         password: String,
+        location: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -40,6 +42,7 @@ impl User {
             email,
             password,
             user_type : Self::USERTYPE_CUSTOMER.to_string(),
+            location
         }
     }
 
@@ -82,6 +85,10 @@ impl User {
     pub fn get_user_type(&self) -> &str {
         &self.user_type
     }
+
+    pub fn get_location(&self) -> Option<&str> {
+        self.location.as_deref()
+    }
 }
 
 #[derive(Insertable)]
@@ -95,6 +102,7 @@ pub struct NewUser {
     email: String,
     password: String,
     user_type: String,
+    location: Option<String>,
 }
 
 impl NewUser {
@@ -107,6 +115,7 @@ impl NewUser {
         phone_number: PhoneNumber,
         email: String,
         password: String,
+        location: Option<String>,
     ) -> Result<Self, Error> {
         let hashed_password = hash_password(&password)?; // Propagate the error
         Ok(Self {
@@ -117,6 +126,7 @@ impl NewUser {
             email,
             password: hashed_password,
             user_type : Self::USERTYPE_CUSTOMER.to_string(),
+            location,
         })
     }
 }

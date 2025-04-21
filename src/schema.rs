@@ -72,6 +72,7 @@ diesel::table! {
         delivery_status -> Text,
         total_price -> Double,
         user_id -> Integer,
+        quantity -> Double,
     }
 }
 
@@ -137,6 +138,7 @@ diesel::table! {
         email -> Text,
         password -> Text,
         user_type -> Text,
+        location -> Nullable<Text>,
     }
 }
 

@@ -3,10 +3,7 @@ use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::{
-    base_types::{email::Email, phone_number::PhoneNumber},
-    contracts::user::{User, UserCreate},
-    db::connection::{get_conn, SqliteConnectionPool},
-    models::user::{User as UserModel, NewUser},
+    base_types::{email::Email, phone_number::PhoneNumber}, contracts::user::{User, UserCreate}, db::connection::{get_conn, SqliteConnectionPool}, models::user::{NewUser, User as UserModel}
 };
 
 #[get("")]
@@ -17,7 +14,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     let conn = &mut get_conn(&pool);
 
     let user_vec = users
-        .select((uuid, first_name, last_name, phone_number, email, user_type))
+        .select(User::as_select())
         .load::<User>(conn);
 
     match user_vec {
@@ -78,6 +75,7 @@ pub async fn create(
                 phone_num,
                 valid_email.get_email(),
                 user.password.to_owned(),
+                user.location.to_owned(),
             ) {
                 Ok(u) => u,
                 Err(e) => return HttpResponse::InternalServerError()
@@ -97,6 +95,7 @@ pub async fn create(
                         phone_number: c.get_phone_number().to_owned(),
                         email: c.get_email().into(),
                         user_type: c.get_user_type().to_owned(),
+                        location: c.get_location().map(|s| s.to_owned()),
                     };
                     HttpResponse::Ok()
                         .status(StatusCode::OK)

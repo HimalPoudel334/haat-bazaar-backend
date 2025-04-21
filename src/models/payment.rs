@@ -48,6 +48,10 @@ impl Payment {
     pub fn get_user_id(&self) -> i32 {
         self.user_id
     }
+
+    pub fn get_order_id(&self) -> i32 {
+        self.order_id
+    }
 }
 
 #[derive(Insertable)]

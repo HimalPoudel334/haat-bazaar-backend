@@ -7,5 +7,5 @@ CREATE TABLE IF NOT EXISTS users (
   phone_number TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL, 
-  user_type TEXT NOT NULL
+  user_type TEXT NOT NULL DEFAULT 'Customer' CHECK(user_type IN ('Admin', 'Customer'))
 );
