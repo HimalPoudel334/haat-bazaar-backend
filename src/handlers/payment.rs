@@ -15,17 +15,14 @@ use crate::{
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, UserInfo, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
-            ProductDetail,
+            AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase, ProductDetail, UserInfo
         },
-        order::OrderCreate,
-        payment::{EsewaCallbackResponse, EsewaTransactionResponse, KhaltiQueryParams, NewPayment, Payment},
+        order::{self, CategoryResponse, OrderCreate, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
+        payment::{EsewaCallbackResponse, EsewaTransactionResponse, KhaltiPidxPayload, KhaltiQueryParams, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        user::User as UserModel,
-        order::Order as OrderModel,
-        payment::{NewPayment as NewPaymentModel, Payment as PaymentModel},
+        order::Order as OrderModel, payment::{NewPayment as NewPaymentModel, Payment as PaymentModel}, user::User as UserModel
     },
     utils,
 };
@@ -365,56 +362,38 @@ async fn verify_transaction(
 }
 
 //khalti payment integration
-#[post("/khalti")]
+#[get("/khalti")]
 pub async fn khalti_payment_get_pidx(
-    order_json: web::Json<OrderCreate>,
+    pidx_payload: web::Query<KhaltiPidxPayload>,
     pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     println!("Hit by android khalti get pidx");
-    use crate::schema::users::dsl::*;
 
-    // get a pooled connection from db
-    let conn = &mut get_conn(&pool);
-
-    let user_id: String = match utils::uuid_validator::validate_uuid(&order_json.user_id) {
+    let order_id: String = match utils::uuid_validator::validate_uuid(&pidx_payload.order_id) {
         Ok(c) => c,
         Err(http_response) => return http_response,
     };
 
-    let user: UserModel = match users
-        .filter(uuid.eq(&user_id))
-        .select(UserModel::as_select())
-        .first(conn)
-        .optional()
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "User not found"}))
-        }
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
-        }
+    let order_details: OrderResponse = match get_order_details(order_id, pool).await {
+        Ok(o) => o,
+        Err(http_response) => return http_response,
     };
 
     let user_info = UserInfo {
-        name: user.get_full_name(),
-        email: user.get_email().to_owned(),
-        phone: user.get_phone_number().to_owned(),
+        name: format!("{} {}", order_details.customer.first_name, order_details.customer.last_name),
+        email: order_details.customer.email,
+        phone: order_details.customer.phone_number,
     };
 
-    let product_details = order_json
+    let product_details = order_details
         .order_items
         .iter()
         .map(|item| {
             ProductDetail::new(
-                item.product_id.to_owned(),
-                "product name".into(),
+                item.uuid.to_owned(),
+                item.product.name.to_owned(),
                 item.quantity * item.price,
                 item.price,
                 item.quantity,
@@ -425,26 +404,23 @@ pub async fn khalti_payment_get_pidx(
     let khalti_payment_payload = KhaltiPaymentPayload::create(
         "http://10.0.2.2:8080/payments/khalti/payment/confirmation".into(), //supply a url that can be accessed from anywhere
         "http://10.0.2.2:8080".into(),
-        order_json.total_price,
-        "some id".into(),
-        "some order name".into(),
+        order_details.total_price,
+        order_details.uuid.into(),
+        format!("{}'s Order", user_info.name),
         user_info,
         Some(
             vec![
-                AmountBreakdown::new("Delivery Charge".into(), order_json.delivery_charge),
-                AmountBreakdown::new("Product Charge".into(), order_json.total_price - order_json.delivery_charge)
+                AmountBreakdown::new("Delivery Charge".into(), order_details.delivery_charge),
+                AmountBreakdown::new("Product Charge".into(), order_details.total_price - order_details.delivery_charge)
             ]
         ),
         Some(product_details),
-        "khalti username".into(),
-        String::from(""),
+        "Himal Poudel".into(), ////merchant username
+        String::from(""), //merchant extra
     );
 
     println!("khalti_payment_payload: {khalti_payment_payload:?}");
 
-    HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json! ({"payload": khalti_payment_payload}))
-
-    /*
     let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
 
     let response_result = client
@@ -504,11 +480,13 @@ pub async fn khalti_payment_get_pidx(
     println!("-----");
 
     HttpResponse::Ok().status(StatusCode::OK).json(response)
-    */
 }
 
 #[get("/khalti/confirmation")]
-pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>, client: web::Data<Client>, app_config: web::Data<ApplicationConfiguration>) -> impl Responder {
+pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>, 
+    client: web::Data<Client>,
+     app_config: web::Data<ApplicationConfiguration>
+) -> impl Responder {
     println!("Hit by khalti confirmation");
 
    //hit khalti lookup api for payment confirmation
@@ -575,4 +553,152 @@ pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>,
         }
     }
 
+}
+
+async fn get_order_details(
+    ord_id: String,
+    pool: web::Data<SqliteConnectionPool>,
+) -> Result<OrderResponse, HttpResponse> {
+    use crate::schema::categories::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::order_items::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{categories, users, order_items, orders, products};
+
+    // Get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    type OrderTuple = (
+        String,
+        String,
+        String,
+        f64,
+        String,
+        String,
+        f64,
+        (String, String, String, String, String, String),
+        (
+            String,
+            f64,
+            f64,
+            (
+                String,
+                String,
+                String,
+                String,
+                f64,
+                String,
+                (String, String),
+            ),
+        ),
+    );
+
+    match orders
+        .inner_join(users.on(user_id.eq(users::id)))
+        .inner_join(order_items.on(order_id.eq(orders::id)))
+        .inner_join(products.on(order_items::product_id.eq(products::id)))
+        .inner_join(categories.on(products::category_id.eq(categories::id)))
+        .filter(orders::uuid.eq(&ord_id))
+        .select((
+            orders::uuid,
+            orders::created_on,
+            orders::fulfilled_on,
+            orders::delivery_charge,
+            orders::delivery_location,
+            orders::delivery_status,
+            orders::total_price,
+            (
+                users::uuid,
+                users::first_name,
+                users::last_name,
+                users::phone_number,
+                users::email,
+                users::user_type,
+            ),
+            (
+                order_items::uuid,
+                order_items::quantity,
+                order_items::price,
+                (
+                    products::uuid,
+                    products::name,
+                    products::description,
+                    products::image,
+                    products::price,
+                    products::unit,
+                    (categories::uuid, categories::name),
+                ),
+            ),
+        ))
+        .first::<OrderTuple>(conn)
+        .optional()
+    {
+        Ok(Some(o)) => {
+            let (
+                order_uuid,
+                order_created_on,
+                order_fulfilled_on,
+                order_delivery_charge,
+                order_delivery_location,
+                order_delivery_status,
+                order_total_price,
+                (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
+                (
+                    order_item_uuid,
+                    order_item_quantity,
+                    order_item_price,
+                    (
+                        product_uuid,
+                        product_name,
+                        product_description,
+                        product_image,
+                        product_price,
+                        product_unit,
+                        (category_uuid, category_name),
+                    ),
+                ),
+            ) = o;
+
+            let ord_res: OrderResponse = OrderResponse {
+                uuid: order_uuid,
+                created_on: order_created_on,
+                fulfilled_on: order_fulfilled_on,
+                delivery_charge: order_delivery_charge,
+                delivery_location: order_delivery_location,
+                delivery_status: order_delivery_status,
+                total_price: order_total_price,
+                customer: UserResponse {
+                    uuid: user_uuid,
+                    first_name: user_first_name,
+                    last_name: user_last_name,
+                    phone_number: user_phone_number,
+                    email: user_email,
+                    user_type: utype,
+                },
+                order_items: vec![OrderItemResponse {
+                    uuid: order_item_uuid,
+                    quantity: order_item_quantity,
+                    price: order_item_price,
+                    product: ProductResponse {
+                        uuid: product_uuid,
+                        name: product_name,
+                        description: product_description,
+                        image: product_image,
+                        price: product_price,
+                        unit: product_unit,
+                        category: CategoryResponse {
+                            uuid: category_uuid,
+                            name: category_name,
+                        },
+                    },
+                }],
+            };
+            Ok(ord_res)
+        }
+        Ok(None) => Err(HttpResponse::NotFound()
+            .json(serde_json::json!({"message": "Order not found"}))),
+        Err(_) => Err(HttpResponse::InternalServerError()
+            .json(serde_json::json!({"message": "Ops! something went wrong"}))),
+    }
 }

@@ -78,7 +78,7 @@ pub async fn create(
                 user.location.to_owned(),
             ) {
                 Ok(u) => u,
-                Err(e) => return HttpResponse::InternalServerError()
+                Err(_e) => return HttpResponse::InternalServerError()
                    .status(StatusCode::INTERNAL_SERVER_ERROR)
                    .json(serde_json::json!({"message": "Something went wrong while creating a new user"})),
             };

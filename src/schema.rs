@@ -73,6 +73,7 @@ diesel::table! {
         total_price -> Double,
         user_id -> Integer,
         quantity -> Double,
+        status -> Text,
     }
 }
 

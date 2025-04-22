@@ -76,3 +76,9 @@ pub struct KhaltiQueryParams {
     pub purchase_order_name: String,
     pub transaction_id: String,
 }
+
+#[derive(Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct KhaltiPidxPayload {
+    pub order_id: String,
+}
