@@ -17,7 +17,7 @@ use crate::{
         khalti_payment::{
             AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase, ProductDetail, UserInfo
         },
-        order::{self, CategoryResponse, OrderCreate, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
+        order::{CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
         payment::{EsewaCallbackResponse, EsewaTransactionResponse, KhaltiPidxPayload, KhaltiQueryParams, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -421,10 +421,8 @@ pub async fn khalti_payment_get_pidx(
 
     println!("khalti_payment_payload: {khalti_payment_payload:?}");
 
-    let khalti_url = "https://a.khalti.com/api/v2/epayment/initiate/";
-
     let response_result = client
-        .post(khalti_url)
+        .post(&app_config.khalti_pidx_url)
         .header(
             AUTHORIZATION,
             &format!("key {}", &app_config.khalti_live_secret_key),
@@ -577,6 +575,7 @@ async fn get_order_details(
         String,
         String,
         f64,
+        String,
         (String, String, String, String, String, String),
         (
             String,
@@ -608,6 +607,7 @@ async fn get_order_details(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::status,
             (
                 users::uuid,
                 users::first_name,
@@ -643,6 +643,7 @@ async fn get_order_details(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
@@ -668,6 +669,7 @@ async fn get_order_details(
                 delivery_location: order_delivery_location,
                 delivery_status: order_delivery_status,
                 total_price: order_total_price,
+                status: order_status,
                 customer: UserResponse {
                     uuid: user_uuid,
                     first_name: user_first_name,

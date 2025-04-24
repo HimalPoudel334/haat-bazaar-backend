@@ -30,6 +30,7 @@ pub struct OrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
+    pub status: String,
     pub customer: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
 }
@@ -85,6 +86,7 @@ pub struct UserOrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
+    pub status: String,
     pub order_items: Vec<OrderItemResponse>,
 }
 

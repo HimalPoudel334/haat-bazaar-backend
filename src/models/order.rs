@@ -2,7 +2,7 @@ use chrono::Days;
 use diesel::prelude::*;
 use uuid::Uuid;
 
-use crate::base_types::delivery_status::DeliveryStatus;
+use crate::base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus};
 
 use super::user::User;
 
@@ -21,6 +21,7 @@ pub struct Order {
     total_price: f64,
     user_id: i32,
     quantity: f64,
+    status: String
 }
 
 impl Order {
@@ -62,6 +63,10 @@ impl Order {
     pub fn get_quantity(&self) -> f64 {
         self.quantity
     }
+
+    pub fn get_status(&self) -> &str {
+        &self.status
+    }
 }
 
 #[derive(Insertable)]
@@ -76,6 +81,7 @@ pub struct NewOrder {
     total_price: f64,
     quantity: f64,
     user_id: i32,
+    status: String
 }
 
 impl NewOrder {
@@ -87,6 +93,7 @@ impl NewOrder {
         delivery_location: String,
         order_total: f64,
         quantity: f64,
+        status: OrderStatus
     ) -> Self {
         let created_on_clone = created_on.clone();
         Self {
@@ -99,6 +106,7 @@ impl NewOrder {
             user_id: user.get_id(),
             total_price: order_total + delivery_charge,
             quantity,
+            status: status.value().to_owned()
         }
     }
 

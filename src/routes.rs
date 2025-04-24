@@ -53,11 +53,11 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         .service(
             web::scope("/payments")
                 .wrap(Auth::authenticated())
-                .service(payment::get)
                 .service(payment::create)
                 .service(payment::esewa_payment_confirmation)
                 .service(payment::khalti_payment_get_pidx)
-                .service(payment::khalti_payment_confirmation),
+                .service(payment::khalti_payment_confirmation)
+                .service(payment::get),
         )
         .service(
             web::scope("/invoices")

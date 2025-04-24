@@ -3,17 +3,13 @@ use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Resp
 use diesel::prelude::*;
 
 use crate::{
-    base_types::delivery_status::DeliveryStatus,
+    base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus},
     contracts::order::{
-        CategoryResponse, UserOrderResponse, UserResponse, Order, OrderCreate,
-        OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse,
+        CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse, UserOrderResponse, UserResponse
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        user::User as UserModel,
-        order::{NewOrder, Order as OrderModel},
-        order_item::NewOrderItem as NewOrderItemModel,
-        product::Product as ProductModel,
+        order::{NewOrder, Order as OrderModel}, order_item::NewOrderItem as NewOrderItemModel, product::Product as ProductModel, user::User as UserModel
     },
     utils::{self, uuid_validator::DatabaseErrorInfo},
 };
@@ -38,6 +34,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         String,
         String,
         f64,
+        String,
         (String, String, String, String, String, String),
         (
             String,
@@ -68,6 +65,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::status,
             (
                 users::uuid,
                 users::first_name,
@@ -94,66 +92,6 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .load::<OrderTuple>(conn)
         .expect("Error loading orders");
 
-    // let mut order_res: Vec<OrderN> = Vec::new();
-    // for (
-    //     order_uuid,
-    //     order_created_on,
-    //     order_fulfilled_on,
-    //     order_delivery_location,
-    //     order_delivery_status,
-    //     order_total_price,
-    //     (user_uuid, user_first_name, user_last_name, user_phone_number, user_email),
-    //     (
-    //         order_item_uuid,
-    //         order_item_quantity,
-    //         order_item_price,
-    //         (
-    //             product_uuid,
-    //             product_name,
-    //             product_description,
-    //             product_image,
-    //             product_price,
-    //             product_unit,
-    //             (category_uuid, category_name),
-    //         ),
-    //     ),
-    // ) in orders_vec
-    // {
-    //     let ordn = OrderN {
-    //         uuid: order_uuid,
-    //         created_on: order_created_on,
-    //         fulfilled_on: order_fulfilled_on,
-    //         delivery_location: order_delivery_location,
-    //         delivery_status: order_delivery_status,
-    //         total_price: order_total_price,
-    //         user: UserResponse {
-    //             uuid: user_uuid,
-    //             first_name: user_first_name,
-    //             last_name: user_last_name,
-    //             phone_number: user_phone_number,
-    //             email: user_email
-    //         },
-    //         order_items: vec![OrderItemResponse {
-    //             uuid: order_item_uuid,
-    //             quantity: order_item_quantity,
-    //             price: order_item_price,
-    //             product: ProductResponse {
-    //                 uuid: product_uuid,
-    //                 name: product_name,
-    //                 description: product_description,
-    //                 image: product_image,
-    //                 price: product_price,
-    //                 unit: product_unit,
-    //                 category: CategoryN {
-    //                     uuid: category_uuid,
-    //                     name: category_name,
-    //                 },
-    //             },
-    //         }],
-    //     };
-    //     order_res.push(ordn);
-    // }
-
     // Map the results to OrderN
     let orders_vec: Vec<OrderResponse> = orders_vec
         .into_iter()
@@ -166,6 +104,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
@@ -190,6 +129,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                     delivery_location: order_delivery_location,
                     delivery_status: order_delivery_status,
                     total_price: order_total_price,
+                    status: order_status,
                     customer: UserResponse {
                         uuid: user_uuid,
                         first_name: user_first_name,
@@ -260,6 +200,7 @@ pub async fn get_order(
         String,
         String,
         f64,
+        String,
         (String, String, String, String, String, String),
         (
             String,
@@ -291,6 +232,7 @@ pub async fn get_order(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::status,
             (
                 users::uuid,
                 users::first_name,
@@ -326,6 +268,7 @@ pub async fn get_order(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
@@ -350,6 +293,7 @@ pub async fn get_order(
                 delivery_location: order_delivery_location,
                 delivery_status: order_delivery_status,
                 total_price: order_total_price,
+                status: order_status,
                 customer: UserResponse {
                     uuid: user_uuid,
                     first_name: user_first_name,
@@ -442,6 +386,7 @@ pub async fn get_user_orders(
         String,
         String,
         f64,
+        String,
         (
             String,
             f64,
@@ -470,6 +415,7 @@ pub async fn get_user_orders(
                 orders::delivery_location,
                 orders::delivery_status,
                 orders::total_price,
+                orders::status,
                 (
                     order_items::uuid,
                     order_items::quantity,
@@ -497,6 +443,7 @@ pub async fn get_user_orders(
                             order_delivery_location,
                             order_delivery_status,
                             order_total_price,
+                            order_status,
                             (
                                 order_item_uuid,
                                 order_item_quantity,
@@ -520,6 +467,7 @@ pub async fn get_user_orders(
                                 delivery_location: order_delivery_location,
                                 delivery_status: order_delivery_status,
                                 total_price: order_total_price,
+                                status: order_status,
                                 order_items: vec![OrderItemResponse {
                                     uuid: order_item_uuid,
                                     quantity: order_item_quantity,
@@ -620,6 +568,7 @@ pub async fn create(
         order_json.delivery_location.to_owned(),
         order_total,
         order_quantity,
+        OrderStatus::PaymentPending
     );
 
     // Insert the order and order details in a transaction
@@ -750,7 +699,8 @@ pub async fn create_backup(
         DeliveryStatus::Pending,
         order_json.delivery_location.to_owned(),
         order_total,
-        order_quantity
+        order_quantity,
+        OrderStatus::PaymentPending
     );
 
     match diesel::insert_into(orders)
@@ -942,7 +892,7 @@ pub async fn update_delivery_status(
         }
     };
 
-    let status: DeliveryStatus = match order_delivery_status.delivery_status.as_str() {
+    let deliv_status: DeliveryStatus = match order_delivery_status.delivery_status.as_str() {
         "Pending" => DeliveryStatus::Pending,
         "On the way" => DeliveryStatus::OnTheWay,
         "Fulfilled" => DeliveryStatus::Fulfilled,
@@ -979,7 +929,7 @@ pub async fn update_delivery_status(
     };
 
     match diesel::update(&order)
-        .set(delivery_status.eq(status.value()))
+        .set(delivery_status.eq(deliv_status.value()))
         .get_result::<OrderModel>(conn)
     {
         Ok(o) => {
