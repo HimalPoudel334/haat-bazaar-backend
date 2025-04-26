@@ -18,7 +18,7 @@ use crate::{
             AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase, ProductDetail, UserInfo
         },
         order::{CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
-        payment::{EsewaCallbackResponse, KhaltiPidxPayload, KhaltiQueryParams, NewPayment, Payment},
+        payment::{EsewaCallbackResponse, KhaltiPaymentConfirmPayload, KhaltiPaymentLookupResponse, KhaltiPidxPayload, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -155,7 +155,7 @@ pub async fn esewa_payment_confirmation(
         Ok(vr) => match vr.transaction_details.status.as_str() {
             "COMPLETE" => {
                 let order_id = vr.product_id.clone();
-                let order: OrderResponse = match get_order_details(order_id, &pool).await {
+                let order: OrderResponse = match get_order_details(&order_id, &pool).await {
                     Ok(o) => o,
                     Err(http_response) => return http_response
                 };
@@ -255,7 +255,7 @@ pub async fn khalti_payment_get_pidx(
         Err(http_response) => return http_response,
     };
 
-    let order_details: OrderResponse = match get_order_details(order_id, &pool).await {
+    let order_details: OrderResponse = match get_order_details(&order_id, &pool).await {
         Ok(o) => o,
         Err(http_response) => return http_response,
     };
@@ -359,9 +359,11 @@ pub async fn khalti_payment_get_pidx(
     HttpResponse::Ok().status(StatusCode::OK).json(response)
 }
 
-#[get("/khalti/confirmation")]
-pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>, 
+#[post("/khalti/confirmation")]
+pub async fn khalti_payment_confirmation(
+    payload: web::Query<KhaltiPaymentConfirmPayload>,
     client: web::Data<Client>,
+    pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
@@ -387,35 +389,59 @@ pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>,
 
     match khalti_response_result {
         Ok(res) => match res.status() {
-            reqwest::StatusCode::OK => match res.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    println!("confirmation response: {v}");
-                    return HttpResponse::Ok()
-                        .status(StatusCode::OK)
-                        .json(v)
-                }
+            reqwest::StatusCode::OK => match res.json::<KhaltiPaymentLookupResponse>().await {
+                Ok(khalti_response) => {
+                    println!("Confirmation response: {:?}", khalti_response);
+                
+                    match khalti_response.status.as_str() {
+                        "Completed" => {
+                            let order: OrderResponse = match get_order_details(&payload.order_id, &pool).await {
+                                Ok(o) => o,
+                                Err(http_response) => return http_response,
+                            };
+                
+                            let payment: NewPayment = NewPayment {
+                                payment_method: PaymentMethod::Khalti.value().to_string(),
+                                user_id: order.customer.uuid,
+                                order_id: order.uuid,
+                                amount: khalti_response.total_amount,
+                                tendered: khalti_response.total_amount, // Same as amount
+                                transaction_id: Some(khalti_response.transaction_id.to_owned()),
+                            };
+                
+                            return create_payment(web::Json(payment), &pool).await;
+                        },
+                        _ => {
+                            return HttpResponse::BadRequest()
+                                .status(StatusCode::BAD_REQUEST)
+                                .json(serde_json::json!({
+                                    "message": "Payment is not completed"
+                                }));
+                        }
+                    }
+                },                
                 Err(er) => {
                     eprintln!("{er}");
                     return HttpResponse::InternalServerError()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                         .json(serde_json::json!({
-                            "message": format!("Error parsing response from khalti: {}", er)
+                            "message": format!("Error parsing response from Khalti: {}", er)
                         }));
                 }
             },
             _ => match res.json::<serde_json::Value>().await {
                 Ok(v) => {
-                    println!("response: {v}");
+                    println!("Error response: {v}");
                     return HttpResponse::Unauthorized()
                         .status(StatusCode::UNAUTHORIZED)
                         .json(v)
-                }
+                },
                 Err(e) => {
                     eprintln!("{e}");
                     return HttpResponse::InternalServerError()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                         .json(serde_json::json!({
-                            "message": format!("Error parsing error response from khalti: {}", e)
+                            "message": format!("Error parsing error response from Khalti: {}", e)
                         }));
                 }
             },
@@ -425,7 +451,7 @@ pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>,
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .json(serde_json::json!({
-                    "message": format!("Error getting response from khalti: {}", e)
+                    "message": format!("Error getting response from Khalti: {}", e)
                 }));
         }
     }
@@ -568,7 +594,7 @@ pub async fn create_payment(
 
 
 async fn get_order_details(
-    ord_id: String,
+    ord_id: &String,
     pool: &web::Data<SqliteConnectionPool>,
 ) -> Result<OrderResponse, HttpResponse> {
     use crate::schema::categories::dsl::*;
@@ -612,7 +638,7 @@ async fn get_order_details(
         .inner_join(order_items.on(order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .filter(orders::uuid.eq(&ord_id))
+        .filter(orders::uuid.eq(ord_id))
         .select((
             orders::uuid,
             orders::created_on,

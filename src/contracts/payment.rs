@@ -69,17 +69,13 @@ pub struct EsewaCallbackResponse {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub struct KhaltiQueryParams {
+pub struct KhaltiPaymentLookupResponse {
     pub pidx: String,
-    pub txn_id: String,
-    pub amount: String,
-    pub total_amount: String,
+    pub total_amount: f64,
     pub status: String,
-    pub mobile: String,
-    pub tidx: String,
-    pub purchase_order_id: String,
-    pub purchase_order_name: String,
     pub transaction_id: String,
+    pub fee: f64,
+    pub refunded: bool
 }
 
 #[derive(Deserialize, Debug)]
@@ -87,3 +83,11 @@ pub struct KhaltiQueryParams {
 pub struct KhaltiPidxPayload {
     pub order_id: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct KhaltiPaymentConfirmPayload {
+    pub pidx: String,
+    pub order_id: String,
+}
+
+
