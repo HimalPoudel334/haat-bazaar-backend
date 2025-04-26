@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use ::uuid::Uuid;
-use actix_web::{get, http::StatusCode, post, web, HttpRequest, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 use reqwest::{
     header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
@@ -11,14 +11,14 @@ use reqwest::{
 };
 
 use crate::{
-    base_types::payment_method::PaymentMethod,
+    base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod},
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
             AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase, ProductDetail, UserInfo
         },
         order::{CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
-        payment::{EsewaCallbackResponse, EsewaTransactionResponse, KhaltiPidxPayload, KhaltiQueryParams, NewPayment, Payment},
+        payment::{EsewaCallbackResponse, KhaltiPidxPayload, KhaltiQueryParams, NewPayment, Payment},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -33,126 +33,7 @@ pub async fn create(
     payment_json: web::Json<NewPayment>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    //get a pooled connection from db
-    let conn = &mut get_conn(&pool);
-
-    use crate::schema::users::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::payments::dsl::*;
-    use crate::schema::{users, orders};
-
-    //first check if the uuids are valid or not
-    let o_uuid: Uuid = match Uuid::parse_str(&payment_json.order_id) {
-        Ok(o) => o,
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid order id"}))
-        }
-    };
-
-    let c_uuid: Uuid = match Uuid::parse_str(&payment_json.user_id) {
-        Ok(c) => c,
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user id"}))
-        }
-    };
-
-    //check if the payment method provided is valid
-    let pay_method: PaymentMethod = match PaymentMethod::from_str(&payment_json.payment_method) {
-        Ok(pm) => pm,
-        Err(e) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}))
-        }
-    };
-
-    //check if the order_id and user_id are valid or not
-    let order: OrderModel = match orders
-        .filter(orders::uuid.eq(&o_uuid.to_string()))
-        .select(OrderModel::as_select())
-        .first(conn)
-        .optional()
-    {
-        Ok(Some(o)) => o,
-        Ok(None) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Order not found"}))
-        }
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
-        }
-    };
-
-    let user: UserModel = match users
-        .filter(users::uuid.eq(&c_uuid.to_string()))
-        .select(UserModel::as_select())
-        .first(conn)
-        .optional()
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Order not found"}))
-        }
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
-        }
-    };
-
-    //check if user id from order and user id from payment are same
-    if order.get_user_id() != user.get_id() {
-        return HttpResponse::BadRequest()
-            .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Users do not match"}));
-    }
-
-    //if the user and order are valid then check if the order total and payment amount matches
-    if order.get_total_price() != payment_json.amount {
-        return HttpResponse::BadRequest()
-            .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Order total and payment amount did not match"}));
-    }
-
-    //aaile ko laagi eti nai validation
-    //if everything went good then create a new payment
-    let payment: NewPaymentModel = NewPaymentModel::new(
-        &pay_method,
-        &String::from("test transaction id"),
-        &user,
-        &order,
-        &payment_json.pay_date,
-        payment_json.amount,
-    );
-
-    match diesel::insert_into(payments)
-        .values(&payment)
-        .get_result::<PaymentModel>(conn)
-    {
-        Ok(p) => {
-            let pay: Payment = Payment {
-                uuid: p.get_uuid().to_owned(),
-                payment_method: p.get_payment_method().to_owned(),
-                pay_date: p.get_pay_date().to_owned(),
-                user_id: user.get_uuid().to_owned(),
-                order_id: order.get_uuid().to_owned(),
-                amount: p.get_amount(),
-            };
-            HttpResponse::Ok().status(StatusCode::OK).json(pay)
-        }
-        Err(_) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({"message": "Ops! something went wrong"})),
-    }
+    create_payment(payment_json, &pool).await
 }
 
 #[get("/{order_id}")]
@@ -245,6 +126,10 @@ pub async fn get(
         pay_date: payment.get_pay_date().to_owned(),
         amount: payment.get_amount(),
         payment_method: payment.get_payment_method().to_owned(),
+        tendered: payment.get_tendered(),
+        change: payment.get_change(),
+        discount: payment.get_discount(),
+        transaction_id: payment.get_transaction_id().to_owned(),
     };
 
     HttpResponse::Ok()
@@ -254,9 +139,9 @@ pub async fn get(
 
 #[post("/esewa")]
 pub async fn esewa_payment_confirmation(
-    req: HttpRequest,
     req_body: web::Json<EsewaCallbackResponse>,
     client: web::Data<Client>,
+    pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     println!("Hit by esewa");
@@ -264,77 +149,72 @@ pub async fn esewa_payment_confirmation(
     println!("Transaction ref id is {txn_ref_id}");
 
     //Call the verification API with txn_ref_id
-    let verification_result = verify_transaction(txn_ref_id, req, client, app_config).await;
+    let verification_result = verify_transaction(txn_ref_id, client, app_config).await;
 
-    match verification_result {
-        Ok(status) if status == "COMPLETE" => {
-            // Handle successful verification
-            HttpResponse::Ok()
-                .json(serde_json::json!({"status": "success", "verification": "complete"}))
-        }
-        Ok(_) => HttpResponse::Ok()
-            .json(serde_json::json!({"status": "Khai k", "verification": "khai K"})),
+    let response: HttpResponse = match verification_result {
+        Ok(vr) => match vr.transaction_details.status.as_str() {
+            "COMPLETE" => {
+                let order_id = vr.product_id.clone();
+                let order: OrderResponse = match get_order_details(order_id, &pool).await {
+                    Ok(o) => o,
+                    Err(http_response) => return http_response
+                };
+    
+                let payment: NewPayment = NewPayment {
+                    payment_method: PaymentMethod::Esewa.value().to_string(),
+                    user_id: order.customer.uuid,
+                    order_id: order.uuid,
+                    amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
+                    tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
+                    transaction_id: Some(vr.transaction_details.reference_id.to_owned())
+                };
+    
+                return create_payment(web::Json(payment), &pool).await;
+            }
+            _ => {
+                HttpResponse::Ok()
+                    .json(serde_json::json!({
+                        "status": "success",
+                        "verification": "incomplete",
+                        "transaction_status": vr.transaction_details.status
+                    }))
+            }
+        },
         Err(e) => {
             eprintln!("{e:?}");
             HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"status": "failure", "verification": "incomplete", "errorMessage":e.to_string()}))
+                .json(serde_json::json!({
+                    "status": "failure",
+                    "verification": "incomplete",
+                    "errorMessage": e.to_string()
+                }))
         }
-    }
+    };
+    
+    response
 }
 
 async fn verify_transaction(
     txn_ref_id: String,
-    req: HttpRequest,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
-) -> Result<String, reqwest::Error> {
+) -> Result<EsewaCallbackResponse, reqwest::Error> {
     println!("Hit by esewa");
-
-    // Extract headers from the incoming request
-    // let mut headers = HeaderMap::new();
-    // for (key, value) in req.headers().iter() {
-    //     if let (Ok(header_name), Ok(header_value)) = (
-    //         HeaderName::from_str(key.as_str()),
-    //         HeaderValue::from_str(value.to_str().unwrap_or("")),
-    //     ) {
-    //         println!("{header_name}:{:#?}", header_value);
-    //         headers.insert(header_name, header_value);
-    //     }
-    // }
 
     // Extract specific headers from the incoming request
     let mut headers = HeaderMap::new();
-    if let Some(merchant_id) = req.headers().get("merchantId") {
-        headers.insert(
-            "merchantId",
-            HeaderValue::from_bytes(merchant_id.as_bytes()).unwrap_or(
-                HeaderValue::from_str(&app_config.esewa_merchant_id)
-                    .expect("Error setting esewa merchant id 1"),
-            ),
-        );
-    } else {
-        headers.insert(
-            "merchantId",
-            HeaderValue::from_str(&app_config.esewa_merchant_id)
-                .expect("Error setting esewa merchant id 2"),
-        );
-    }
-    if let Some(merchant_secret) = req.headers().get("merchantSecret") {
-        headers.insert(
-            "merchantSecret",
-            HeaderValue::from_bytes(merchant_secret.as_bytes()).unwrap_or(
-                HeaderValue::from_str(&app_config.esewa_merchant_secret)
-                    .expect("Error setting esewa merchant secret 1"),
-            ),
-        );
-    } else {
-        headers.insert(
-            "merchantSecret",
-            HeaderValue::from_str(&app_config.esewa_merchant_secret)
-                .expect("Error setting esewa merchant secret 1"),
-        );
-    }
+   
+    headers.insert(
+        "merchantId",
+        HeaderValue::from_str(&app_config.esewa_merchant_id)
+            .expect("Error setting esewa merchant id"),
+    );
+     
+    headers.insert(
+        "merchantSecret",
+        HeaderValue::from_str(&app_config.esewa_merchant_secret)
+            .expect("Error setting esewa merchant secret"),
+    );
 
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
     
@@ -344,21 +224,20 @@ async fn verify_transaction(
     );
 
     // I don't know why array is returned
-    let response: Vec<EsewaTransactionResponse> = client
+    let response: Vec<EsewaCallbackResponse> = client
         .get(url)
         .headers(headers)
         .timeout(Duration::from_secs(10))
         .send()
         .await?
-        .json::<Vec<EsewaTransactionResponse>>()
+        .json::<Vec<EsewaCallbackResponse>>()
         .await?;
 
     println!("----");
     println!("response: {response:?}");
     println!("-----");
 
-    //Ok(response.transaction_details.status.to_string())
-    Ok(response[0].transaction_details.status.to_string())
+    Ok(response[0].clone())
 }
 
 //khalti payment integration
@@ -376,7 +255,7 @@ pub async fn khalti_payment_get_pidx(
         Err(http_response) => return http_response,
     };
 
-    let order_details: OrderResponse = match get_order_details(order_id, pool).await {
+    let order_details: OrderResponse = match get_order_details(order_id, &pool).await {
         Ok(o) => o,
         Err(http_response) => return http_response,
     };
@@ -483,11 +362,11 @@ pub async fn khalti_payment_get_pidx(
 #[get("/khalti/confirmation")]
 pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>, 
     client: web::Data<Client>,
-     app_config: web::Data<ApplicationConfiguration>
+    app_config: web::Data<ApplicationConfiguration>
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
-   //hit khalti lookup api for payment confirmation
+    //hit khalti lookup api for payment confirmation
     let khalti_url = "https://a.khalti.com/api/v2/epayment/lookup";
 
     let data = serde_json::json!({
@@ -553,9 +432,144 @@ pub async fn khalti_payment_confirmation(payload: web::Query<KhaltiQueryParams>,
 
 }
 
+pub async fn create_payment(
+    payment_json: web::Json<NewPayment>,
+    pool: &web::Data<SqliteConnectionPool>,
+) -> HttpResponse {
+    use crate::schema::{users::dsl as users_dsl, orders::dsl as orders_dsl, payments::dsl::*};
+    use diesel::prelude::*;
+
+    let conn = &mut get_conn(pool);
+
+    // Parse UUIDs
+    let o_uuid = match Uuid::parse_str(&payment_json.order_id) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Invalid order ID"
+            }))
+        }
+    };
+
+    let c_uuid = match Uuid::parse_str(&payment_json.user_id) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Invalid user ID"
+            }))
+        }
+    };
+
+    // Determine payment method and transaction ID
+    let (pay_method, tran_id) = match PaymentMethod::from_str(&payment_json.payment_method) {
+        Ok(PaymentMethod::Cash) => (
+            PaymentMethod::Cash,
+            Some(Uuid::new_v4().to_string().replace("-", "")),
+        ),
+        Ok(method) => (method, payment_json.transaction_id.clone()),
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": e
+            }))
+        }
+    };
+
+    // Start DB transaction
+    let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+        // Fetch order
+        let order: OrderModel = match orders_dsl::orders
+            .filter(orders_dsl::uuid.eq(&o_uuid.to_string()))
+            .select(OrderModel::as_select())
+            .first(con)
+            .optional()? {
+                Some(o) => o,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Order not found"
+                    })))
+                }
+            };
+
+        // Fetch user
+        let user: UserModel = match users_dsl::users
+            .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
+            .select(UserModel::as_select())
+            .first(con)
+            .optional()? {
+                Some(u) => u,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "User not found"
+                    })))
+                }
+            };
+
+        // Verify ownership
+        if order.get_user_id() != user.get_id() {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Users do not match"
+            })));
+        }
+
+        // Verify amount
+        if order.get_total_price() != payment_json.amount {
+            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Order total and payment amount did not match"
+            })));
+        }
+
+        // Update order status
+        diesel::update(&order)
+            .set((
+                orders_dsl::status.eq(OrderStatus::Pending.value()),
+                orders_dsl::delivery_status.eq(DeliveryStatus::Pending.value()),
+            ))
+            .execute(con)?;
+
+        // Create payment
+        let payment_model = NewPaymentModel::new(
+            &pay_method,
+            &tran_id.unwrap(),
+            &user,
+            &order,
+            payment_json.amount,
+            payment_json.tendered,
+        );
+
+        let inserted = diesel::insert_into(payments)
+            .values(&payment_model)
+            .get_result::<PaymentModel>(con)?;
+
+        // Prepare API response
+        let response = Payment {
+            uuid: inserted.get_uuid().to_owned(),
+            payment_method: inserted.get_payment_method().to_owned(),
+            pay_date: inserted.get_pay_date().to_owned(),
+            user_id: user.get_uuid().to_owned(),
+            order_id: order.get_uuid().to_owned(),
+            amount: inserted.get_amount(),
+            transaction_id: inserted.get_transaction_id().to_owned(),
+            tendered: inserted.get_tendered(),
+            change: inserted.get_change(),
+            discount: inserted.get_discount(),
+        };
+
+        Ok(HttpResponse::Ok().json(response))
+    });
+
+    // Handle transaction result
+    match result {
+        Ok(response) => response,
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Oops! Something went wrong"
+        })),
+    }
+}
+
+
 async fn get_order_details(
     ord_id: String,
-    pool: web::Data<SqliteConnectionPool>,
+    pool: &web::Data<SqliteConnectionPool>,
 ) -> Result<OrderResponse, HttpResponse> {
     use crate::schema::categories::dsl::*;
     use crate::schema::users::dsl::*;

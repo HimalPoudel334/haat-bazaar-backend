@@ -87,6 +87,9 @@ diesel::table! {
         user_id -> Integer,
         order_id -> Integer,
         transaction_id -> Text,
+        tendered -> Double,
+        change -> Double,
+        discount -> Double,
     }
 }
 

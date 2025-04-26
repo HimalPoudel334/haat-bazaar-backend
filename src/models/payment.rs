@@ -18,6 +18,9 @@ pub struct  Payment {
     user_id: i32,
     order_id: i32,
     transaction_id: String,
+    tendered: f64,
+    change: f64,
+    discount: f64
 }
 
 impl Payment {
@@ -52,6 +55,18 @@ impl Payment {
     pub fn get_order_id(&self) -> i32 {
         self.order_id
     }
+
+    pub fn get_tendered(&self) -> f64 {
+        self.tendered
+    }
+
+    pub fn get_change(&self) -> f64 {
+        self.change
+    }
+
+    pub fn get_discount(&self) -> f64 {
+        self.discount
+    }
 }
 
 #[derive(Insertable)]
@@ -64,6 +79,9 @@ pub struct NewPayment {
     user_id: i32,
     order_id: i32,
     transaction_id: String,
+    tendered: f64,
+    change: f64,
+    discount: f64
 }
 
 impl NewPayment {
@@ -72,8 +90,8 @@ impl NewPayment {
         transaction_id: &String,
         user: &User,
         order: &Order,
-        pay_date: &String,
         amount: f64,
+        tendered: f64,
     ) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
@@ -81,8 +99,11 @@ impl NewPayment {
             payment_method: payment_method.value().to_owned(),
             user_id: user.get_id(),
             order_id: order.get_id(),
-            pay_date: pay_date.to_owned(),
+            pay_date: chrono::Local::now().to_rfc3339(),
             amount,
+            tendered,
+            change: tendered - amount,
+            discount: 0.0
         }
     }
 }

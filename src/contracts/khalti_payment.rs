@@ -1,41 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/*#[derive(Debug, Deserialize, Serialize)]
-pub struct KhaltiPayment {
-    pub return_url: String,
-    pub website_url: String,
-    pub amount: i64,
-    pub purchase_order_id: String,
-    pub purchase_order_name: String,
-    pub customer_info: CustomerInfo,
-    pub amount_breakdown: Option<Vec<AmountBreakdown>>,
-    pub product_details: Option<Vec<ProductDetail>>,
-    pub merchant_username: String,
-    pub merchant_extra: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CustomerInfo {
-    pub name: String,
-    pub email: String,
-    pub phone: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AmountBreakdown {
-    pub label: String,
-    pub amount: f64,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ProductDetail {
-    pub identity: String,
-    pub name: String,
-    pub total_price: f64,
-    pub quantity: i32,
-    pub unit_price: f64,
-}*/
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UserInfo {
     pub name: String,
@@ -112,22 +76,6 @@ impl KhaltiPaymentPayload {
         merchant_username: String,
         merchant_extra: String,
     ) -> Self {
-        // let amount_breakdown = amount_breakdown.map(|breakdown| {
-        //     breakdown.into_iter().map(|ab| AmountBreakdown {
-        //         label: ab.label,
-        //         amount: (ab.amount * 100.0) as i64,
-        //     }).collect()
-        // });
-
-        // let product_details = product_details.map(|details| {
-        //     details.into_iter().map(|pd| ProductDetail {
-        //         identity: pd.identity,
-        //         name: pd.name,
-        //         total_price: (pd.total_price * 100.0) as i64,
-        //         unit_price: (pd.unit_price * 100.0) as i64,
-        //         quantity: pd.quantity,
-        //     }).collect()
-        // });
 
         Self {
             return_url,

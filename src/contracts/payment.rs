@@ -9,6 +9,10 @@ pub struct Payment {
     pub order_id: String,
     pub pay_date: String,
     pub amount: f64,
+    pub tendered: f64,
+    pub change: f64,
+    pub discount: f64,
+    pub transaction_id: String,
 }
 
 #[derive(Deserialize)]
@@ -17,19 +21,20 @@ pub struct NewPayment {
     pub payment_method: String,
     pub user_id: String,
     pub order_id: String,
-    pub pay_date: String,
     pub amount: f64,
+    pub tendered: f64,
+    pub transaction_id: Option<String>,
 }
 
 // for esewa payment
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EsewaMessage {
     pub success_message: String,
     pub technical_success_message: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EsewaTransactionDetails {
     pub status: String,
@@ -37,7 +42,7 @@ pub struct EsewaTransactionDetails {
     pub date: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EsewaCallbackResponse {
     pub product_id: String,
@@ -50,17 +55,17 @@ pub struct EsewaCallbackResponse {
     pub transaction_details: EsewaTransactionDetails,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct EsewaTransactionResponse {
-    pub product_id: String,
-    pub product_name: String,
-    pub total_amount: String,
-    pub code: String,
-    pub merchant_name: String,
-    pub message: EsewaMessage,
-    pub transaction_details: EsewaTransactionDetails,
-}
+// #[derive(Serialize, Deserialize, Debug)]
+// #[serde(rename_all = "camelCase")]
+// pub struct EsewaTransactionResponse {
+//     pub product_id: String,
+//     pub product_name: String,
+//     pub total_amount: String,
+//     pub code: String,
+//     pub merchant_name: String,
+//     pub message: EsewaMessage,
+//     pub transaction_details: EsewaTransactionDetails,
+// }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
