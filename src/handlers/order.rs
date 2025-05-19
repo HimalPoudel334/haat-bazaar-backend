@@ -4,10 +4,10 @@ use diesel::prelude::*;
 
 use crate::{
     base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus},
-    contracts::{order::{
+    contracts::order::{
         CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
         OrderItemResponse, OrderResponse, ProductResponse, UserOrderResponse, UserResponse,
-    }, order_item::NewOrderItem},
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         cart::Cart as CartModel,
@@ -16,7 +16,7 @@ use crate::{
         product::Product as ProductModel,
         user::User as UserModel,
     },
-    utils::uuid_validator::{self, DatabaseErrorInfo},
+    utils::uuid_validator::{self},
 };
 
 #[get("")]
@@ -527,23 +527,23 @@ pub async fn create(
     use crate::schema::users::dsl::*;
     use crate::schema::{products, users};
 
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
     // Validate user existence
     let mut order_total: f64 = 0.0;
     let mut order_quantity: f64 = 0.0;
-    (&order_json.order_items).into_iter().for_each(|od| {
+    for od in &order_json.order_items {
         order_total += od.price;
         order_quantity += od.quantity;
-    });
+    }
 
     if order_total != order_json.total_price - 100.0 {
         //the 100 is delivery charge which is hard coded for now.
         return HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
+            .json(serde_json::json!({"message": "Order data tempered. Price of items and order total do not match"}));
     }
-
-    //get a pooled connection from db
-    let conn = &mut get_conn(&pool);
 
     let user: UserModel = match users
         .filter(users::uuid.eq(user_uuid.to_string()))
@@ -577,35 +577,43 @@ pub async fn create(
     );
 
     // Insert the order and order details in a transaction
-    match conn.transaction::<_, diesel::result::Error, _>(|conn| {
+    match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
         let order: OrderModel = diesel::insert_into(orders)
-            .values(&new_order)
-            .get_result(conn)?;
+                    .values(&new_order)
+                    .get_result(con)?;
+        
+        for order_item in &order_json.order_items {
 
-        for order_detail in &order_json.order_items {
-            let product: ProductModel = products
-                .filter(products::uuid.eq(&order_detail.product_id))
+            let product: ProductModel = match products
+                .filter(products::uuid.eq(&order_item.product_id))
                 .select(ProductModel::as_select())
-                .first(conn)?;
+                .first(con)
+                .optional()?
+            {
+                Some(p) => p,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product not found for order"
+                    })));
+                }
+            };
 
-            if product.get_stock() < order_detail.quantity {
-                return Err(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::Unknown,
-                    Box::new(DatabaseErrorInfo {
-                        message: "Ordered quantity is greater than product stock".into(),
-                    }),
-                ));
+            if product.get_stock() < order_item.quantity {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product out of stock"
+                    })));
             }
 
-            let od: NewOrderItemModel =
-                NewOrderItemModel::new(order_detail.quantity, &product, &order);
+            let new_order_item: NewOrderItemModel =
+                NewOrderItemModel::new(order_item.quantity, &product, &order);
 
-            diesel::insert_into(order_items).values(&od).execute(conn)?;
+            diesel::insert_into(order_items).values(&new_order_item).execute(con)?;
 
             //update the product stock if order creation successful
             diesel::update(&product)
-                .set(products::stock.eq(products::stock - order_detail.quantity))
-                .execute(conn)?;
+                .set(products::stock.eq(products::stock - order_item.quantity))
+                .execute(con)?;
+
         }
 
         let order_vm: Order = Order {
@@ -623,20 +631,14 @@ pub async fn create(
             .status(StatusCode::OK)
             .json(serde_json::json!({"order": order_vm})))
     }) {
-        Ok(http_response) => http_response,
-        Err(e) => match e {
-            diesel::result::Error::NotFound => HttpResponse::NotFound()
-                .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message":"Product not found"})),
-            diesel::result::Error::DatabaseError(_, c) => HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message":c.message()})),
-            _ => HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message":"Ops! something went wrong"})),
-        },
+
+        Ok(response) => response,
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Failed to process order transaction"
+        })),
+
     }
-}
+}   
 
 #[post("/cart/create-order")]
 pub async fn create_orders_from_cart(
@@ -703,7 +705,7 @@ pub async fn create_orders_from_cart(
                 .first::<CartModel>(con)
                 .optional()?
             {
-                Some(o) => o,
+                Some(c) => c,
                 None => {
                     return Ok(HttpResponse::BadRequest().json(serde_json::json!({
                         "message": format!("Cart not found: {}", cart_id)
@@ -723,6 +725,12 @@ pub async fn create_orders_from_cart(
                     })));
                 }
             };
+
+            if product.get_stock() < cart.get_quantity() {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product out of stock"
+                    })));
+            }
 
             order_total_price += cart.get_quantity() as f64 * product.get_price();
             order_total_quantity += cart.get_quantity();
@@ -759,6 +767,14 @@ pub async fn create_orders_from_cart(
             diesel::insert_into(order_items)
                 .values(&new_order_item)
                 .execute(con)?;
+
+            //update the product stock if order creation successful
+            diesel::update(&product)
+                .set(products::stock.eq(products::stock - cart.get_quantity()))
+                .execute(con)?;
+
+            //delete from cart
+            diesel::delete(&cart).execute(con)?;
         }
 
         Ok(HttpResponse::Ok().json(serde_json::json!({
@@ -774,140 +790,6 @@ pub async fn create_orders_from_cart(
         })),
     }
 
-}
-
-#[post("")]
-pub async fn create_backup(
-    order_json: web::Json<OrderCreate>,
-    pool: web::Data<SqliteConnectionPool>,
-) -> impl Responder {
-    //first validate the user exists or not
-    //before that lets check whether the provided user id is a valid guid or not
-    let user_uuid: Uuid = match Uuid::parse_str(&order_json.user_id) {
-        Ok(c) => c,
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user id"}));
-        }
-    };
-
-    use crate::schema::order_items::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::users::dsl::*;
-    use crate::schema::{products, users};
-
-    let mut order_total: f64 = 0.0;
-    let mut order_quantity: f64 = 0.0;
-    (&order_json.order_items).into_iter().for_each(|od| {
-        order_total += od.price;
-        order_quantity += od.quantity;
-    });
-
-    if order_total != order_json.total_price {
-        return HttpResponse::BadRequest()
-            .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
-    }
-
-    //get a pooled connection from db
-    let conn = &mut get_conn(&pool);
-
-    let user: UserModel = match users
-        .filter(users::uuid.eq(user_uuid.to_string()))
-        .select(UserModel::as_select())
-        .first(conn)
-        .optional()
-    {
-        Ok(Some(c)) => c,
-        Ok(None) => {
-            return HttpResponse::NotFound()
-                .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "User not found"}));
-        }
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}));
-        }
-    };
-
-    let order: NewOrder = NewOrder::new(
-        &user,
-        order_json.created_on.to_owned(),
-        order_json.delivery_charge,
-        DeliveryStatus::Pending,
-        order_json.delivery_location.to_owned(),
-        order_total,
-        order_quantity,
-        OrderStatus::PaymentPending,
-    );
-
-    match diesel::insert_into(orders)
-        .values(&order)
-        .get_result::<OrderModel>(conn)
-    {
-        Ok(o) => {
-            //if any one of this failed, then god will help
-            for order_detail in &order_json.order_items {
-                let pr: ProductModel = match products
-                    .filter(products::uuid.eq(&order_detail.product_id))
-                    .select(ProductModel::as_select())
-                    .first(conn)
-                    .optional()
-                {
-                    Ok(Some(p)) => p,
-                    Ok(None) => {
-                        return HttpResponse::NotFound()
-                            .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Product not found"}))
-                    }
-                    Err(_) => {
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
-                    }
-                };
-
-                if pr.get_stock() < order_detail.quantity {
-                    return HttpResponse::BadRequest()
-                            .status(StatusCode::BAD_REQUEST)
-                            .json(serde_json::json!({"message": "Ordered product quantity is greater than stock"}));
-                }
-
-                let od: NewOrderItemModel = NewOrderItemModel::new(order_detail.quantity, &pr, &o);
-
-                diesel::insert_into(order_items)
-                    .values(&od)
-                    .execute(conn)
-                    .unwrap();
-
-                //update the product stock if order creation successful
-                diesel::update(&pr)
-                    .set(products::stock.eq(products::stock - order_detail.quantity))
-                    .execute(conn)
-                    .unwrap();
-            }
-
-            let order: Order = Order {
-                user_id: user_uuid.to_string(),
-                created_on: o.get_created_on().to_owned(),
-                fulfilled_on: o.get_fulfilled_on().to_owned(),
-                total_price: o.get_total_price(),
-                uuid: o.get_uuid().to_string(),
-                delivery_charge: o.get_delivery_charge(),
-                delivery_location: o.get_delivery_location().to_owned(),
-                delivery_status: o.get_delivery_status().to_owned(),
-            };
-            HttpResponse::Ok()
-                .status(StatusCode::OK)
-                .json(serde_json::json!({"order": order}))
-        }
-        Err(_) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({"message": "Ops! something went wrong"})),
-    }
 }
 
 #[put("/{order_id}")]

@@ -1,7 +1,7 @@
 use diesel::prelude::*;
 use uuid::Uuid;
 
-use super::{user::User, product::Product};
+use super::{product::Product, user::User};
 
 #[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::carts)]
@@ -35,7 +35,7 @@ impl Cart {
     pub fn get_quantity(&self) -> f64 {
         self.quantity
     }
-    pub fn get_sku(&self) -> &str{
+    pub fn get_sku(&self) -> &str {
         &self.sku
     }
     pub fn get_created_on(&self) -> &str {

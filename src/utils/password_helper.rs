@@ -1,4 +1,7 @@
-use argon2::{password_hash::{Error, SaltString}, Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
+use argon2::{
+    password_hash::{Error, SaltString},
+    Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+};
 use rand_core::OsRng;
 
 /// Hashes a password securely using Argon2 and returns it in PHC string format.
@@ -20,4 +23,3 @@ pub fn verify_password_hash(hashed_password: &str, input_password: &str) -> bool
         Err(_) => false,
     }
 }
-
