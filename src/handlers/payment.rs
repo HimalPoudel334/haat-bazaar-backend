@@ -361,7 +361,7 @@ pub async fn khalti_payment_get_pidx(
 
 #[post("/khalti/confirmation")]
 pub async fn khalti_payment_confirmation(
-    payload: web::Query<KhaltiPaymentConfirmPayload>,
+    payload: web::Json<KhaltiPaymentConfirmPayload>,
     client: web::Data<Client>,
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>

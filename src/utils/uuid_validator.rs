@@ -7,7 +7,7 @@ pub fn validate_uuid(uuid: &str) -> Result<String, HttpResponse> {
         Ok(uid) => Ok(uid.to_string()),
         Err(_) => Err(HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Invalid uuid"}))),
+            .json(serde_json::json!({"message": "Invalid Id provided"}))),
     }
 }
 

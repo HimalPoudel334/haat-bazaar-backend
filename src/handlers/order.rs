@@ -4,14 +4,19 @@ use diesel::prelude::*;
 
 use crate::{
     base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus},
-    contracts::order::{
-        CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse, UserOrderResponse, UserResponse
-    },
+    contracts::{order::{
+        CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
+        OrderItemResponse, OrderResponse, ProductResponse, UserOrderResponse, UserResponse,
+    }, order_item::NewOrderItem},
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        order::{NewOrder, Order as OrderModel}, order_item::NewOrderItem as NewOrderItemModel, product::Product as ProductModel, user::User as UserModel
+        cart::Cart as CartModel,
+        order::{NewOrder, Order as OrderModel},
+        order_item::NewOrderItem as NewOrderItemModel,
+        product::Product as ProductModel,
+        user::User as UserModel,
     },
-    utils::{self, uuid_validator::DatabaseErrorInfo},
+    utils::uuid_validator::{self, DatabaseErrorInfo},
 };
 
 #[get("")]
@@ -20,11 +25,11 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     let conn = &mut get_conn(&pool);
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     type OrderTuple = (
         String,
@@ -72,7 +77,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 users::last_name,
                 users::phone_number,
                 users::email,
-                users::user_type
+                users::user_type,
             ),
             (
                 order_items::uuid,
@@ -136,7 +141,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                         last_name: user_last_name,
                         phone_number: user_phone_number,
                         email: user_email,
-                        user_type : utype
+                        user_type: utype,
                     },
                     order_items: vec![OrderItemResponse {
                         uuid: order_item_uuid,
@@ -183,11 +188,11 @@ pub async fn get_order(
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -239,7 +244,7 @@ pub async fn get_order(
                 users::last_name,
                 users::phone_number,
                 users::email,
-                users::user_type
+                users::user_type,
             ),
             (
                 order_items::uuid,
@@ -300,7 +305,7 @@ pub async fn get_order(
                     last_name: user_last_name,
                     phone_number: user_phone_number,
                     email: user_email,
-                    user_type : utype
+                    user_type: utype,
                 },
                 order_items: vec![OrderItemResponse {
                     uuid: order_item_uuid,
@@ -350,10 +355,10 @@ pub async fn get_user_orders(
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -511,16 +516,16 @@ pub async fn create(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     // Validate the user UUID
-    let user_uuid = match utils::uuid_validator::validate_uuid(&order_json.user_id) {
+    let user_uuid = match uuid_validator::validate_uuid(&order_json.user_id) {
         Ok(uid) => uid,
         Err(e) => return e,
     };
 
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{users, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{products, users};
 
     // Validate user existence
     let mut order_total: f64 = 0.0;
@@ -568,7 +573,7 @@ pub async fn create(
         order_json.delivery_location.to_owned(),
         order_total,
         order_quantity,
-        OrderStatus::PaymentPending
+        OrderStatus::PaymentPending,
     );
 
     // Insert the order and order details in a transaction
@@ -595,9 +600,7 @@ pub async fn create(
             let od: NewOrderItemModel =
                 NewOrderItemModel::new(order_detail.quantity, &product, &order);
 
-            diesel::insert_into(order_items)
-                .values(&od)
-                .execute(conn)?;
+            diesel::insert_into(order_items).values(&od).execute(conn)?;
 
             //update the product stock if order creation successful
             diesel::update(&product)
@@ -635,6 +638,144 @@ pub async fn create(
     }
 }
 
+#[post("/cart/create-order")]
+pub async fn create_orders_from_cart(
+    carts_json: web::Json<CartCheckout>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    for cart in &carts_json.cart_ids {
+        match uuid_validator::validate_uuid(cart) {
+            Ok(_) => (),
+            Err(res) => return res,
+        };
+    }
+
+    let user_uuid = match uuid_validator::validate_uuid(&carts_json.user_id) {
+        Ok(uid) => uid,
+        Err(e) => return e,
+    };
+
+    use crate::schema::carts::dsl::*;
+    use crate::schema::order_items::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::{carts, products, users};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    //validate user exists
+    let user: UserModel = match users
+        .filter(users::uuid.eq(user_uuid.to_string()))
+        .select(UserModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "User not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    if user.get_location().is_none() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "User's location is missing. Please update location"
+        }));
+    }
+
+    // validate cart items exists
+    let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+        let mut order_items_vec: Vec<(CartModel, ProductModel)> = vec![];
+        let mut order_total_price = 0.0;
+        let mut order_total_quantity = 0.0;
+
+        for cart_id in &carts_json.cart_ids {
+            let cart: CartModel = match carts
+                .filter(carts::uuid.eq(&cart_id))
+                .first::<CartModel>(con)
+                .optional()?
+            {
+                Some(o) => o,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": format!("Cart not found: {}", cart_id)
+                    })));
+                }
+            };
+
+            let product: ProductModel = match products
+                .filter(products::uuid.eq(&cart.get_uuid()))
+                .first::<ProductModel>(con)
+                .optional()?
+            {
+                Some(p) => p,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product not found for order"
+                    })));
+                }
+            };
+
+            order_total_price += cart.get_quantity() as f64 * product.get_price();
+            order_total_quantity += cart.get_quantity();
+
+            order_items_vec.push((cart, product));
+        }
+
+        let nepal_time = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(5*3600 + 45*60).unwrap());
+        let formatted_time = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let order = NewOrder::new(
+            &user,
+            formatted_time,
+            100.0, //delivery charge
+            DeliveryStatus::Pending,
+            user.get_location().unwrap().to_owned(),
+            order_total_price,
+            order_total_quantity,
+            OrderStatus::PaymentPending,
+        );
+
+        let inserted_order: OrderModel = diesel::insert_into(orders)
+            .values(&order)
+            .get_result(con)?;
+
+        // Now insert all order items
+        for (cart, product) in order_items_vec {
+            let new_order_item = NewOrderItemModel::new(
+                cart.get_quantity(),
+                &product,
+                &inserted_order,
+            );
+
+            diesel::insert_into(order_items)
+                .values(&new_order_item)
+                .execute(con)?;
+        }
+
+        Ok(HttpResponse::Ok().json(serde_json::json!({
+            "message": "Order created successfully",
+            "order_id": inserted_order.get_uuid()
+        })))
+    });
+
+    match result {
+        Ok(response) => response,
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Failed to process order transaction"
+        })),
+    }
+
+}
+
 #[post("")]
 pub async fn create_backup(
     order_json: web::Json<OrderCreate>,
@@ -651,11 +792,11 @@ pub async fn create_backup(
         }
     };
 
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{users, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{products, users};
 
     let mut order_total: f64 = 0.0;
     let mut order_quantity: f64 = 0.0;
@@ -700,7 +841,7 @@ pub async fn create_backup(
         order_json.delivery_location.to_owned(),
         order_total,
         order_quantity,
-        OrderStatus::PaymentPending
+        OrderStatus::PaymentPending,
     );
 
     match diesel::insert_into(orders)
@@ -735,8 +876,7 @@ pub async fn create_backup(
                             .json(serde_json::json!({"message": "Ordered product quantity is greater than stock"}));
                 }
 
-                let od: NewOrderItemModel =
-                    NewOrderItemModel::new(order_detail.quantity, &pr, &o);
+                let od: NewOrderItemModel = NewOrderItemModel::new(order_detail.quantity, &pr, &o);
 
                 diesel::insert_into(order_items)
                     .values(&od)
@@ -798,9 +938,9 @@ pub async fn edit(
         }
     };
 
-    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{users, orders};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{orders, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);

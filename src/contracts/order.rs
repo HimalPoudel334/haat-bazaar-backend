@@ -118,3 +118,9 @@ pub struct OrderEdit {
 pub struct OrderDeliveryStatus {
     pub delivery_status: String,
 }
+
+#[derive(Deserialize)]
+pub struct CartCheckout {
+    pub cart_ids: Vec<String>,
+    pub user_id: String,
+}
