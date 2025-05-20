@@ -3,18 +3,17 @@ use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Resp
 use diesel::prelude::*;
 
 use crate::{
-    base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus},
+    base_types::{
+        delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
+    },
     contracts::order::{
         CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
-        OrderItemResponse, OrderResponse, ProductResponse, UserOrderResponse, UserResponse,
+        OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate, ProductResponse,
+        UserOrderResponse, UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        cart::Cart as CartModel,
-        order::{NewOrder, Order as OrderModel},
-        order_item::NewOrderItem as NewOrderItemModel,
-        product::Product as ProductModel,
-        user::User as UserModel,
+        cart::Cart as CartModel, invoice::{Invoice, NewInvoice}, invoice_item::NewInvoiceItem, order::{NewOrder, Order as OrderModel}, order_item::NewOrderItem as NewOrderItemModel, payment::{NewPayment, Payment as PaymentModel}, product::Product as ProductModel, shipment::NewShipment, user::User as UserModel
     },
     utils::uuid_validator::{self},
 };
@@ -521,9 +520,20 @@ pub async fn create(
         Err(e) => return e,
     };
 
+    let pay_method: PaymentMethod = match PaymentMethod::from_str(&order_json.payment_method) {
+        Ok(pm) => pm,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": e}))
+        }
+    };
+
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::shipments::dsl::*;
     use crate::schema::users::dsl::*;
     use crate::schema::{products, users};
 
@@ -578,12 +588,12 @@ pub async fn create(
 
     // Insert the order and order details in a transaction
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+        let mut prods = vec![];
         let order: OrderModel = diesel::insert_into(orders)
-                    .values(&new_order)
-                    .get_result(con)?;
-        
-        for order_item in &order_json.order_items {
+            .values(&new_order)
+            .get_result(con)?;
 
+        for order_item in &order_json.order_items {
             let product: ProductModel = match products
                 .filter(products::uuid.eq(&order_item.product_id))
                 .select(ProductModel::as_select())
@@ -600,20 +610,81 @@ pub async fn create(
 
             if product.get_stock() < order_item.quantity {
                 return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Product out of stock"
-                    })));
+                    "message": "Product out of stock"
+                })));
             }
 
             let new_order_item: NewOrderItemModel =
                 NewOrderItemModel::new(order_item.quantity, &product, &order);
 
-            diesel::insert_into(order_items).values(&new_order_item).execute(con)?;
+            diesel::insert_into(order_items)
+                .values(&new_order_item)
+                .execute(con)?;
 
             //update the product stock if order creation successful
             diesel::update(&product)
                 .set(products::stock.eq(products::stock - order_item.quantity))
                 .execute(con)?;
 
+            prods.push(product);
+        }
+
+        // If payment method is cash create shipment and invoice else create from payment
+        if pay_method == PaymentMethod::Cash {
+            let user_location = user.get_location().unwrap_or("");
+            let shipment: NewShipment = NewShipment::new(user_location, &order);
+            diesel::insert_into(shipments)
+                .values(&shipment)
+                .execute(con)?;
+
+            //create payment
+            let tran_id = Uuid::new_v4().to_string().replace("-", "");
+            let new_payment: NewPayment = NewPayment::new(
+                &pay_method,
+                &tran_id,
+                &user,
+                &order,
+                order.get_total_price(),
+                order.get_total_price(),
+            ); //amount  and tendered same same
+
+            let payment = diesel::insert_into(payments)
+                .values(&new_payment)
+                .get_result::<PaymentModel>(con)?;
+
+            //update order status to payment completed
+            diesel::update(&order)
+                .set(status.eq(OrderStatus::Processed.value()))
+                .execute(con)?;
+
+            //create invoice
+            let inv_date = chrono::Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
+            let new_inv: NewInvoice = NewInvoice::new(
+                &inv_date,
+                order.get_total_price(),
+                0.0, //vat percent
+                &order,
+                &user,
+                &payment
+            );
+
+            let inv = diesel::insert_into(crate::schema::invoices::table)
+                .values(&new_inv)
+                .get_result::<Invoice>(con)?;
+
+            for prod in prods {
+                let new_inv_item: NewInvoiceItem = NewInvoiceItem::new(
+                    &prod,
+                    &inv,
+                    prod.get_price(),
+                    0.0, //discount percent
+                    0.0, //discount amount
+                );
+
+                diesel::insert_into(crate::schema::invoice_items::table)
+                    .values(&new_inv_item)
+                    .execute(con)?;
+            }
         }
 
         let order_vm: Order = Order {
@@ -631,14 +702,12 @@ pub async fn create(
             .status(StatusCode::OK)
             .json(serde_json::json!({"order": order_vm})))
     }) {
-
         Ok(response) => response,
         Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
             "message": "Failed to process order transaction"
         })),
-
     }
-}   
+}
 
 #[post("/cart/create-order")]
 pub async fn create_orders_from_cart(
@@ -728,8 +797,8 @@ pub async fn create_orders_from_cart(
 
             if product.get_stock() < cart.get_quantity() {
                 return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Product out of stock"
-                    })));
+                    "message": "Product out of stock"
+                })));
             }
 
             order_total_price += cart.get_quantity() as f64 * product.get_price();
@@ -738,7 +807,8 @@ pub async fn create_orders_from_cart(
             order_items_vec.push((cart, product));
         }
 
-        let nepal_time = chrono::Utc::now().with_timezone(&chrono::FixedOffset::east_opt(5*3600 + 45*60).unwrap());
+        let nepal_time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
         let formatted_time = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
 
         let order = NewOrder::new(
@@ -752,17 +822,13 @@ pub async fn create_orders_from_cart(
             OrderStatus::PaymentPending,
         );
 
-        let inserted_order: OrderModel = diesel::insert_into(orders)
-            .values(&order)
-            .get_result(con)?;
+        let inserted_order: OrderModel =
+            diesel::insert_into(orders).values(&order).get_result(con)?;
 
         // Now insert all order items
         for (cart, product) in order_items_vec {
-            let new_order_item = NewOrderItemModel::new(
-                cart.get_quantity(),
-                &product,
-                &inserted_order,
-            );
+            let new_order_item =
+                NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
 
             diesel::insert_into(order_items)
                 .values(&new_order_item)
@@ -789,7 +855,6 @@ pub async fn create_orders_from_cart(
             "message": "Failed to process order transaction"
         })),
     }
-
 }
 
 #[put("/{order_id}")]
@@ -896,10 +961,10 @@ pub async fn edit(
     }
 }
 
-#[patch("/{order_id}/delivery-status/update")]
-pub async fn update_delivery_status(
+#[patch("/{order_id}/order-status/update")]
+pub async fn update_order_status(
     order_id: web::Path<(String,)>,
-    order_delivery_status: web::Query<OrderDeliveryStatus>,
+    order_status: web::Query<OrderStatusUpdate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     let order_uid: String = order_id.into_inner().0;
@@ -914,15 +979,13 @@ pub async fn update_delivery_status(
         }
     };
 
-    let deliv_status: DeliveryStatus = match order_delivery_status.delivery_status.as_str() {
-        "Pending" => DeliveryStatus::Pending,
-        "On the way" => DeliveryStatus::OnTheWay,
-        "Fulfilled" => DeliveryStatus::Fulfilled,
-        "Cancelled" => DeliveryStatus::Cancelled,
-        _ => return HttpResponse::BadRequest()
+    let order_status: OrderStatus = match OrderStatus::from_str(&order_status.status) {
+        Ok(s) => s,
+        Err(e) => {
+            return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid delivery status. Valid values are 'Peding', 'Cancelled', 'On the way', 'Fulfilled'"}))
-
+                .json(serde_json::json!({"message": format!("{}", e)}))
+        }
     };
 
     //find the order
@@ -951,7 +1014,82 @@ pub async fn update_delivery_status(
     };
 
     match diesel::update(&order)
-        .set(delivery_status.eq(deliv_status.value()))
+        .set(status.eq(order_status.value()))
+        .get_result::<OrderModel>(conn)
+    {
+        Ok(o) => {
+            let order: Order = Order {
+                user_id: String::from("N/A"),
+                created_on: o.get_created_on().to_owned(),
+                fulfilled_on: o.get_fulfilled_on().to_owned(),
+                total_price: o.get_total_price(),
+                uuid: order_uid.to_string(),
+                delivery_charge: o.get_delivery_charge(),
+                delivery_location: o.get_delivery_location().to_owned(),
+                delivery_status: o.get_delivery_status().to_owned(),
+            };
+            HttpResponse::Ok().status(StatusCode::OK).json(order)
+        }
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
+#[patch("/{order_id}/delivery-status/update")]
+pub async fn update_delivery_status(
+    order_id: web::Path<(String,)>,
+    order_delivery_status: web::Query<OrderDeliveryStatus>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let order_uid: String = order_id.into_inner().0;
+
+    //check if the given id is a valid guid or not
+    let order_uid: Uuid = match Uuid::parse_str(&order_uid) {
+        Ok(o_id) => o_id,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    let deli_status = match DeliveryStatus::from_str(&order_delivery_status.delivery_status) {
+        Ok(s) => s,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": format!("{}", e)}))
+        }
+    };
+
+    //find the order
+    use crate::schema::orders::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    let order: OrderModel = match orders
+        .filter(uuid.eq(&order_uid.to_string()))
+        .select(OrderModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Order not found"        }))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    match diesel::update(&order)
+        .set(delivery_status.eq(deli_status.value()))
         .get_result::<OrderModel>(conn)
     {
         Ok(o) => {

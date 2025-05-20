@@ -1,7 +1,7 @@
 use actix_web::web;
 
 use crate::{
-    handlers::{auth, cart, category, invoice, order, order_details, payment, product, user},
+    handlers::{auth, cart, category, invoice, order, order_item, payment, product, user},
     middlewares::auth_middleware::Auth,
 };
 
@@ -39,9 +39,9 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         .service(
             web::scope("/order-details")
                 .wrap(Auth::authenticated())
-                .service(order_details::get)
-                .service(order_details::get_order_detail)
-                .service(order_details::add_order_detail),
+                .service(order_item::get)
+                .service(order_item::get_order_detail)
+                .service(order_item::add_order_detail),
         )
         .service(
             web::scope("/carts")
@@ -87,6 +87,11 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
                         .service(user::edit)
                         .service(user::delete),
                 )
-                .service(web::scope("/orders").service(order::get_orders)),
+                .service(
+                    web::scope("/orders")
+                        .service(order::update_order_status)
+                        .service(order::update_delivery_status)
+                        .service(order::get_orders),
+                ),
         );
 }

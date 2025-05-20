@@ -101,6 +101,7 @@ pub struct OrderCreate {
     pub total_price: f64,
     pub user_id: String,
     pub order_items: Vec<NewOrderItem>,
+    pub payment_method: String,
 }
 
 #[derive(Deserialize)]
@@ -117,6 +118,12 @@ pub struct OrderEdit {
 #[serde(rename_all = "camelCase")]
 pub struct OrderDeliveryStatus {
     pub delivery_status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderStatus {
+    pub status: String,
 }
 
 #[derive(Deserialize)]

@@ -3,7 +3,10 @@ use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::{
-    base_types::{email::Email, phone_number::PhoneNumber}, contracts::user::{User, UserCreate}, db::connection::{get_conn, SqliteConnectionPool}, models::user::{NewUser, User as UserModel}
+    base_types::{email::Email, phone_number::PhoneNumber},
+    contracts::user::{User, UserCreate},
+    db::connection::{get_conn, SqliteConnectionPool},
+    models::user::{NewUser, User as UserModel},
 };
 
 #[get("")]
@@ -13,9 +16,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let user_vec = users
-        .select(User::as_select())
-        .load::<User>(conn);
+    let user_vec = users.select(User::as_select()).load::<User>(conn);
 
     match user_vec {
         Ok(uv) => HttpResponse::Ok()
@@ -42,6 +43,25 @@ pub async fn create(
                 .json(serde_json::json!({"message": e}));
         }
     };
+
+    // Location validation
+    //Location should in the below format address,city,state,country
+    let is_valid_location = match &user.location {
+        Some(loc) => {
+            if loc.matches(',').count() != 3 {
+                false
+            } else {
+                loc.split(',').all(|part| !part.trim().is_empty())
+            }
+        }
+        None => false,
+    };
+
+    if !is_valid_location {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "Invalid location format. Expected: 'street, city, state, country'"
+        }));
+    }
 
     let valid_email: Email = match Email::from_str(user.email.to_owned()) {
         Ok(em) => em,
@@ -97,9 +117,7 @@ pub async fn create(
                         user_type: c.get_user_type().to_owned(),
                         location: c.get_location().map(|s| s.to_owned()),
                     };
-                    HttpResponse::Ok()
-                        .status(StatusCode::OK)
-                        .json(user_created)
+                    HttpResponse::Ok().status(StatusCode::OK).json(user_created)
                 }
                 Err(e) => HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -317,9 +335,7 @@ pub async fn edit(
         ))
         .execute(conn)
     {
-        Ok(_) => HttpResponse::Ok()
-            .status(StatusCode::OK)
-            .json(user_update),
+        Ok(_) => HttpResponse::Ok().status(StatusCode::OK).json(user_update),
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),

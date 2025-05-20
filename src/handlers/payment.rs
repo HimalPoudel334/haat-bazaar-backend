@@ -11,18 +11,29 @@ use reqwest::{
 };
 
 use crate::{
-    base_types::{delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod},
+    base_types::{
+        delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
+    },
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase, ProductDetail, UserInfo
+            AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
+            ProductDetail, UserInfo,
         },
-        order::{CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse},
-        payment::{EsewaCallbackResponse, KhaltiPaymentConfirmPayload, KhaltiPaymentLookupResponse, KhaltiPidxPayload, NewPayment, Payment},
+        order::{
+            CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse,
+        },
+        payment::{
+            EsewaCallbackResponse, KhaltiPaymentConfirmPayload, KhaltiPaymentLookupResponse,
+            KhaltiPidxPayload, NewPayment, Payment,
+        },
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        order::Order as OrderModel, payment::{NewPayment as NewPaymentModel, Payment as PaymentModel}, user::User as UserModel
+        invoice::{Invoice, NewInvoice},
+        order::Order as OrderModel,
+        payment::{NewPayment as NewPaymentModel, Payment as PaymentModel},
+        user::User as UserModel,
     },
     utils,
 };
@@ -54,9 +65,9 @@ pub async fn get(
     };
 
     //check if payment exists or not
-    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
+    use crate::schema::users::dsl::*;
     use crate::schema::{orders, payments};
 
     //get a pooled connection from db
@@ -157,40 +168,36 @@ pub async fn esewa_payment_confirmation(
                 let order_id = vr.product_id.clone();
                 let order: OrderResponse = match get_order_details(&order_id, &pool).await {
                     Ok(o) => o,
-                    Err(http_response) => return http_response
+                    Err(http_response) => return http_response,
                 };
-    
+
                 let payment: NewPayment = NewPayment {
                     payment_method: PaymentMethod::Esewa.value().to_string(),
                     user_id: order.customer.uuid,
                     order_id: order.uuid,
                     amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
                     tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
-                    transaction_id: Some(vr.transaction_details.reference_id.to_owned())
+                    transaction_id: Some(vr.transaction_details.reference_id.to_owned()),
                 };
-    
+
                 return create_payment(web::Json(payment), &pool).await;
             }
-            _ => {
-                HttpResponse::Ok()
-                    .json(serde_json::json!({
-                        "status": "success",
-                        "verification": "incomplete",
-                        "transaction_status": vr.transaction_details.status
-                    }))
-            }
+            _ => HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "verification": "incomplete",
+                "transaction_status": vr.transaction_details.status
+            })),
         },
         Err(e) => {
             eprintln!("{e:?}");
-            HttpResponse::BadRequest()
-                .json(serde_json::json!({
-                    "status": "failure",
-                    "verification": "incomplete",
-                    "errorMessage": e.to_string()
-                }))
+            HttpResponse::BadRequest().json(serde_json::json!({
+                "status": "failure",
+                "verification": "incomplete",
+                "errorMessage": e.to_string()
+            }))
         }
     };
-    
+
     response
 }
 
@@ -203,13 +210,13 @@ async fn verify_transaction(
 
     // Extract specific headers from the incoming request
     let mut headers = HeaderMap::new();
-   
+
     headers.insert(
         "merchantId",
         HeaderValue::from_str(&app_config.esewa_merchant_id)
             .expect("Error setting esewa merchant id"),
     );
-     
+
     headers.insert(
         "merchantSecret",
         HeaderValue::from_str(&app_config.esewa_merchant_secret)
@@ -217,7 +224,7 @@ async fn verify_transaction(
     );
 
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
-    
+
     let url = format!(
         "https://rc.esewa.com.np/mobile/transaction?txnRefId={}",
         txn_ref_id
@@ -261,7 +268,10 @@ pub async fn khalti_payment_get_pidx(
     };
 
     let user_info = UserInfo {
-        name: format!("{} {}", order_details.customer.first_name, order_details.customer.last_name),
+        name: format!(
+            "{} {}",
+            order_details.customer.first_name, order_details.customer.last_name
+        ),
         email: order_details.customer.email,
         phone: order_details.customer.phone_number,
     };
@@ -287,15 +297,16 @@ pub async fn khalti_payment_get_pidx(
         order_details.uuid.into(),
         format!("{}'s Order", user_info.name),
         user_info,
-        Some(
-            vec![
-                AmountBreakdown::new("Delivery Charge".into(), order_details.delivery_charge),
-                AmountBreakdown::new("Product Charge".into(), order_details.total_price - order_details.delivery_charge)
-            ]
-        ),
+        Some(vec![
+            AmountBreakdown::new("Delivery Charge".into(), order_details.delivery_charge),
+            AmountBreakdown::new(
+                "Product Charge".into(),
+                order_details.total_price - order_details.delivery_charge,
+            ),
+        ]),
         Some(product_details),
         "Himal Poudel".into(), ////merchant username
-        String::from(""), //merchant extra
+        String::from(""),      //merchant extra
     );
 
     println!("khalti_payment_payload: {khalti_payment_payload:?}");
@@ -330,7 +341,7 @@ pub async fn khalti_payment_get_pidx(
                     println!("response: {v}");
                     return HttpResponse::Unauthorized()
                         .status(StatusCode::UNAUTHORIZED)
-                        .json(v)
+                        .json(v);
                 }
                 Err(e) => {
                     eprintln!("{e}");
@@ -364,7 +375,7 @@ pub async fn khalti_payment_confirmation(
     payload: web::Json<KhaltiPaymentConfirmPayload>,
     client: web::Data<Client>,
     pool: web::Data<SqliteConnectionPool>,
-    app_config: web::Data<ApplicationConfiguration>
+    app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
@@ -392,14 +403,15 @@ pub async fn khalti_payment_confirmation(
             reqwest::StatusCode::OK => match res.json::<KhaltiPaymentLookupResponse>().await {
                 Ok(khalti_response) => {
                     println!("Confirmation response: {:?}", khalti_response);
-                
+
                     match khalti_response.status.as_str() {
                         "Completed" => {
-                            let order: OrderResponse = match get_order_details(&payload.order_id, &pool).await {
-                                Ok(o) => o,
-                                Err(http_response) => return http_response,
-                            };
-                
+                            let order: OrderResponse =
+                                match get_order_details(&payload.order_id, &pool).await {
+                                    Ok(o) => o,
+                                    Err(http_response) => return http_response,
+                                };
+
                             let payment: NewPayment = NewPayment {
                                 payment_method: PaymentMethod::Khalti.value().to_string(),
                                 user_id: order.customer.uuid,
@@ -408,9 +420,9 @@ pub async fn khalti_payment_confirmation(
                                 tendered: khalti_response.total_amount, // Same as amount
                                 transaction_id: Some(khalti_response.transaction_id.to_owned()),
                             };
-                
+
                             return create_payment(web::Json(payment), &pool).await;
-                        },
+                        }
                         _ => {
                             return HttpResponse::BadRequest()
                                 .status(StatusCode::BAD_REQUEST)
@@ -419,7 +431,7 @@ pub async fn khalti_payment_confirmation(
                                 }));
                         }
                     }
-                },                
+                }
                 Err(er) => {
                     eprintln!("{er}");
                     return HttpResponse::InternalServerError()
@@ -434,8 +446,8 @@ pub async fn khalti_payment_confirmation(
                     println!("Error response: {v}");
                     return HttpResponse::Unauthorized()
                         .status(StatusCode::UNAUTHORIZED)
-                        .json(v)
-                },
+                        .json(v);
+                }
                 Err(e) => {
                     eprintln!("{e}");
                     return HttpResponse::InternalServerError()
@@ -455,14 +467,13 @@ pub async fn khalti_payment_confirmation(
                 }));
         }
     }
-
 }
 
 pub async fn create_payment(
     payment_json: web::Json<NewPayment>,
     pool: &web::Data<SqliteConnectionPool>,
 ) -> HttpResponse {
-    use crate::schema::{users::dsl as users_dsl, orders::dsl as orders_dsl, payments::dsl::*};
+    use crate::schema::{orders::dsl as orders_dsl, payments::dsl::*, users::dsl as users_dsl};
     use diesel::prelude::*;
 
     let conn = &mut get_conn(pool);
@@ -507,28 +518,30 @@ pub async fn create_payment(
             .filter(orders_dsl::uuid.eq(&o_uuid.to_string()))
             .select(OrderModel::as_select())
             .first(con)
-            .optional()? {
-                Some(o) => o,
-                None => {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Order not found"
-                    })))
-                }
-            };
+            .optional()?
+        {
+            Some(o) => o,
+            None => {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "Order not found"
+                })))
+            }
+        };
 
         // Fetch user
         let user: UserModel = match users_dsl::users
             .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
             .select(UserModel::as_select())
             .first(con)
-            .optional()? {
-                Some(u) => u,
-                None => {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "User not found"
-                    })))
-                }
-            };
+            .optional()?
+        {
+            Some(u) => u,
+            None => {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "User not found"
+                })))
+            }
+        };
 
         // Verify ownership
         if order.get_user_id() != user.get_id() {
@@ -592,17 +605,16 @@ pub async fn create_payment(
     }
 }
 
-
 async fn get_order_details(
     ord_id: &String,
     pool: &web::Data<SqliteConnectionPool>,
 ) -> Result<OrderResponse, HttpResponse> {
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     // Get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -738,9 +750,11 @@ async fn get_order_details(
             };
             Ok(ord_res)
         }
-        Ok(None) => Err(HttpResponse::NotFound()
-            .json(serde_json::json!({"message": "Order not found"}))),
+        Ok(None) => {
+            Err(HttpResponse::NotFound().json(serde_json::json!({"message": "Order not found"})))
+        }
         Err(_) => Err(HttpResponse::InternalServerError()
             .json(serde_json::json!({"message": "Ops! something went wrong"}))),
     }
 }
+
