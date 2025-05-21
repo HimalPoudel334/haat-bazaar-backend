@@ -3,20 +3,22 @@ use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Resp
 use diesel::prelude::*;
 
 use crate::{
-    base_types::delivery_status::DeliveryStatus,
+    base_types::{
+        delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
+    },
     contracts::order::{
-        CategoryResponse, UserOrderResponse, UserResponse, Order, OrderCreate,
-        OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse, ProductResponse,
+        CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
+        OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate, ProductResponse,
+        UserOrderResponse, UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        user::User as UserModel,
-        order::{NewOrder, Order as OrderModel},
-        order_item::NewOrderItem as NewOrderItemModel,
-        product::Product as ProductModel,
+        cart::Cart as CartModel, invoice::{Invoice, NewInvoice}, invoice_item::NewInvoiceItem, order::{NewOrder, Order as OrderModel}, order_item::NewOrderItem as NewOrderItemModel, payment::{NewPayment, Payment as PaymentModel}, product::Product as ProductModel, shipment::NewShipment, user::User as UserModel
     },
-    utils::{self, uuid_validator::DatabaseErrorInfo},
+    utils::uuid_validator::{self},
 };
+
+pub const DELIVERY_CHARGE: f64 = 100.0;
 
 #[get("")]
 pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
@@ -24,11 +26,11 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     let conn = &mut get_conn(&pool);
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     type OrderTuple = (
         String,
@@ -38,6 +40,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         String,
         String,
         f64,
+        String,
         (String, String, String, String, String, String),
         (
             String,
@@ -68,13 +71,14 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::status,
             (
                 users::uuid,
                 users::first_name,
                 users::last_name,
                 users::phone_number,
                 users::email,
-                users::user_type
+                users::user_type,
             ),
             (
                 order_items::uuid,
@@ -94,66 +98,6 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
         .load::<OrderTuple>(conn)
         .expect("Error loading orders");
 
-    // let mut order_res: Vec<OrderN> = Vec::new();
-    // for (
-    //     order_uuid,
-    //     order_created_on,
-    //     order_fulfilled_on,
-    //     order_delivery_location,
-    //     order_delivery_status,
-    //     order_total_price,
-    //     (user_uuid, user_first_name, user_last_name, user_phone_number, user_email),
-    //     (
-    //         order_item_uuid,
-    //         order_item_quantity,
-    //         order_item_price,
-    //         (
-    //             product_uuid,
-    //             product_name,
-    //             product_description,
-    //             product_image,
-    //             product_price,
-    //             product_unit,
-    //             (category_uuid, category_name),
-    //         ),
-    //     ),
-    // ) in orders_vec
-    // {
-    //     let ordn = OrderN {
-    //         uuid: order_uuid,
-    //         created_on: order_created_on,
-    //         fulfilled_on: order_fulfilled_on,
-    //         delivery_location: order_delivery_location,
-    //         delivery_status: order_delivery_status,
-    //         total_price: order_total_price,
-    //         user: UserResponse {
-    //             uuid: user_uuid,
-    //             first_name: user_first_name,
-    //             last_name: user_last_name,
-    //             phone_number: user_phone_number,
-    //             email: user_email
-    //         },
-    //         order_items: vec![OrderItemResponse {
-    //             uuid: order_item_uuid,
-    //             quantity: order_item_quantity,
-    //             price: order_item_price,
-    //             product: ProductResponse {
-    //                 uuid: product_uuid,
-    //                 name: product_name,
-    //                 description: product_description,
-    //                 image: product_image,
-    //                 price: product_price,
-    //                 unit: product_unit,
-    //                 category: CategoryN {
-    //                     uuid: category_uuid,
-    //                     name: category_name,
-    //                 },
-    //             },
-    //         }],
-    //     };
-    //     order_res.push(ordn);
-    // }
-
     // Map the results to OrderN
     let orders_vec: Vec<OrderResponse> = orders_vec
         .into_iter()
@@ -166,6 +110,7 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
@@ -190,13 +135,14 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
                     delivery_location: order_delivery_location,
                     delivery_status: order_delivery_status,
                     total_price: order_total_price,
+                    status: order_status,
                     customer: UserResponse {
                         uuid: user_uuid,
                         first_name: user_first_name,
                         last_name: user_last_name,
                         phone_number: user_phone_number,
                         email: user_email,
-                        user_type : utype
+                        user_type: utype,
                     },
                     order_items: vec![OrderItemResponse {
                         uuid: order_item_uuid,
@@ -243,11 +189,11 @@ pub async fn get_order(
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -260,6 +206,7 @@ pub async fn get_order(
         String,
         String,
         f64,
+        String,
         (String, String, String, String, String, String),
         (
             String,
@@ -291,13 +238,14 @@ pub async fn get_order(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::status,
             (
                 users::uuid,
                 users::first_name,
                 users::last_name,
                 users::phone_number,
                 users::email,
-                users::user_type
+                users::user_type,
             ),
             (
                 order_items::uuid,
@@ -326,6 +274,7 @@ pub async fn get_order(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
@@ -350,13 +299,14 @@ pub async fn get_order(
                 delivery_location: order_delivery_location,
                 delivery_status: order_delivery_status,
                 total_price: order_total_price,
+                status: order_status,
                 customer: UserResponse {
                     uuid: user_uuid,
                     first_name: user_first_name,
                     last_name: user_last_name,
                     phone_number: user_phone_number,
                     email: user_email,
-                    user_type : utype
+                    user_type: utype,
                 },
                 order_items: vec![OrderItemResponse {
                     uuid: order_item_uuid,
@@ -406,10 +356,10 @@ pub async fn get_user_orders(
     };
 
     use crate::schema::categories::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{categories, users, order_items, orders, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{categories, order_items, orders, products, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -442,6 +392,7 @@ pub async fn get_user_orders(
         String,
         String,
         f64,
+        String,
         (
             String,
             f64,
@@ -470,6 +421,7 @@ pub async fn get_user_orders(
                 orders::delivery_location,
                 orders::delivery_status,
                 orders::total_price,
+                orders::status,
                 (
                     order_items::uuid,
                     order_items::quantity,
@@ -497,6 +449,7 @@ pub async fn get_user_orders(
                             order_delivery_location,
                             order_delivery_status,
                             order_total_price,
+                            order_status,
                             (
                                 order_item_uuid,
                                 order_item_quantity,
@@ -520,6 +473,7 @@ pub async fn get_user_orders(
                                 delivery_location: order_delivery_location,
                                 delivery_status: order_delivery_status,
                                 total_price: order_total_price,
+                                status: order_status,
                                 order_items: vec![OrderItemResponse {
                                     uuid: order_item_uuid,
                                     quantity: order_item_quantity,
@@ -562,37 +516,39 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    // Validate the user UUID
-    let user_uuid = match utils::uuid_validator::validate_uuid(&order_json.user_id) {
+
+    use crate::schema::{
+        order_items, orders, products, payments, shipments, users, invoices, invoice_items,
+    };
+
+    let user_uuid = match uuid_validator::validate_uuid(&order_json.user_id) {
         Ok(uid) => uid,
         Err(e) => return e,
     };
 
-    use crate::schema::users::dsl::*;
-    use crate::schema::order_items::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::{users, products};
+    let pay_method = match PaymentMethod::from_str(&order_json.payment_method) {
+        Ok(pm) => pm,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": e.to_string()}))
+        }
+    };
 
-    // Validate user existence
-    let mut order_total: f64 = 0.0;
-    let mut order_quantity: f64 = 0.0;
-    (&order_json.order_items).into_iter().for_each(|od| {
-        order_total += od.price;
-        order_quantity += od.quantity;
-    });
-
-    if order_total != order_json.total_price - 100.0 {
-        //the 100 is delivery charge which is hard coded for now.
-        return HttpResponse::BadRequest()
-            .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
-    }
-
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let user: UserModel = match users
+    let (order_total, order_quantity) = order_json.order_items.iter().fold(
+        (0.0, 0.0),
+        |(total, quantity), od| (total + od.price, quantity + od.quantity),
+    );
+
+    if (order_total + DELIVERY_CHARGE) != order_json.total_price {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Order data tempered. Price of items and order total do not match"}));
+    }
+
+    let user: UserModel = match users::table
         .filter(users::uuid.eq(user_uuid.to_string()))
         .select(UserModel::as_select())
         .first(conn)
@@ -611,52 +567,114 @@ pub async fn create(
         }
     };
 
-    // Create a new order
     let new_order = NewOrder::new(
         &user,
-        order_json.created_on.to_owned(),
+        &order_json.created_on,
         order_json.delivery_charge,
         DeliveryStatus::Pending,
-        order_json.delivery_location.to_owned(),
+        &order_json.delivery_location,
         order_total,
         order_quantity,
+        OrderStatus::PaymentPending,
     );
 
-    // Insert the order and order details in a transaction
-    match conn.transaction::<_, diesel::result::Error, _>(|conn| {
-        let order: OrderModel = diesel::insert_into(orders)
+    match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+        let mut products_in_order = vec![];
+        let order: OrderModel = diesel::insert_into(orders::table)
             .values(&new_order)
-            .get_result(conn)?;
+            .get_result(con)?;
 
-        for order_detail in &order_json.order_items {
-            let product: ProductModel = products
-                .filter(products::uuid.eq(&order_detail.product_id))
+        for order_item in &order_json.order_items {
+            let product: ProductModel = match products::table
+                .filter(products::uuid.eq(&order_item.product_id))
                 .select(ProductModel::as_select())
-                .first(conn)?;
+                .first(con)
+                .optional()?
+            {
+                Some(p) => p,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product not found for order"
+                    })));
+                }
+            };
 
-            if product.get_stock() < order_detail.quantity {
-                return Err(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::Unknown,
-                    Box::new(DatabaseErrorInfo {
-                        message: "Ordered quantity is greater than product stock".into(),
-                    }),
-                ));
+            if product.get_stock() < order_item.quantity {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "Product out of stock"
+                })));
             }
 
-            let od: NewOrderItemModel =
-                NewOrderItemModel::new(order_detail.quantity, &product, &order);
+            let new_order_item = NewOrderItemModel::new(order_item.quantity, &product, &order);
+            diesel::insert_into(order_items::table)
+                .values(&new_order_item)
+                .execute(con)?;
 
-            diesel::insert_into(order_items)
-                .values(&od)
-                .execute(conn)?;
-
-            //update the product stock if order creation successful
             diesel::update(&product)
-                .set(products::stock.eq(products::stock - order_detail.quantity))
-                .execute(conn)?;
+                .set(products::stock.eq(products::stock - order_item.quantity))
+                .execute(con)?;
+
+            products_in_order.push(product);
         }
 
-        let order_vm: Order = Order {
+        if pay_method == PaymentMethod::Cash {
+            let user_location = user.get_location().unwrap_or_default();
+            let shipment = NewShipment::new(user_location, &order);
+            diesel::insert_into(shipments::table)
+                .values(&shipment)
+                .execute(con)?;
+
+            let tran_id = Uuid::new_v4().to_string().replace('-', "");
+            let new_payment = NewPayment::new(
+                &pay_method,
+                &tran_id,
+                &user,
+                &order,
+                order.get_total_price(),
+                order.get_total_price(),
+            );
+
+            let payment = diesel::insert_into(payments::table)
+                .values(&new_payment)
+                .get_result::<PaymentModel>(con)?;
+
+            diesel::update(&order)
+                .set(orders::status.eq(OrderStatus::Processed.value()))
+                .execute(con)?;
+
+            let nepal_time = chrono::Utc::now()
+                .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+            let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+            let new_inv = NewInvoice::new(
+                &inv_date,
+                order.get_total_price(),
+                0.0,
+                &order,
+                &user,
+                &payment,
+            );
+
+            let inv = diesel::insert_into(invoices::table)
+                .values(&new_inv)
+                .get_result::<Invoice>(con)?;
+
+            for prod in products_in_order {
+                let new_inv_item = NewInvoiceItem::new(
+                    &prod,
+                    &inv,
+                    prod.get_price(),
+                    0.0,
+                    0.0,
+                );
+
+                diesel::insert_into(invoice_items::table)
+                    .values(&new_inv_item)
+                    .execute(con)?;
+            }
+        }
+
+        let order_vm = Order {
             user_id: user_uuid.to_string(),
             created_on: order.get_created_on().to_owned(),
             fulfilled_on: order.get_fulfilled_on().to_owned(),
@@ -671,59 +689,47 @@ pub async fn create(
             .status(StatusCode::OK)
             .json(serde_json::json!({"order": order_vm})))
     }) {
-        Ok(http_response) => http_response,
-        Err(e) => match e {
-            diesel::result::Error::NotFound => HttpResponse::NotFound()
-                .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message":"Product not found"})),
-            diesel::result::Error::DatabaseError(_, c) => HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message":c.message()})),
-            _ => HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message":"Ops! something went wrong"})),
-        },
+        Ok(response) => response,
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Failed to process order transaction"
+        })),
     }
 }
 
-#[post("")]
-pub async fn create_backup(
-    order_json: web::Json<OrderCreate>,
+#[post("/cart/create-order")]
+pub async fn create_orders_from_cart(
+    carts_json: web::Json<CartCheckout>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    //first validate the user exists or not
-    //before that lets check whether the provided user id is a valid guid or not
-    let user_uuid: Uuid = match Uuid::parse_str(&order_json.user_id) {
-        Ok(c) => c,
-        Err(_) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user id"}));
-        }
+
+    let pay_method: PaymentMethod = match PaymentMethod::from_str(&carts_json.payment_method) {
+        Ok(pm) => pm,
+        Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"message": e.to_string()})),
+    };
+    
+    let user_uuid = match uuid_validator::validate_uuid(&carts_json.user_id) {
+        Ok(uid) => uid,
+        Err(e) => return e,
     };
 
-    use crate::schema::users::dsl::*;
+    for cart in &carts_json.cart_ids {
+        match uuid_validator::validate_uuid(cart) {
+            Ok(_) => (),
+            Err(res) => return res,
+        };
+    }
+
+    use crate::schema::carts::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{users, products};
-
-    let mut order_total: f64 = 0.0;
-    let mut order_quantity: f64 = 0.0;
-    (&order_json.order_items).into_iter().for_each(|od| {
-        order_total += od.price;
-        order_quantity += od.quantity;
-    });
-
-    if order_total != order_json.total_price {
-        return HttpResponse::BadRequest()
-            .status(StatusCode::BAD_REQUEST)
-            .json(serde_json::json!({"message": "Order data tempered.\nPrice of items and order total do not match"}));
-    }
+    use crate::schema::users::dsl::*;
+    use crate::schema::{carts, products, users, payments, shipments, invoices, invoice_items};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
+    //validate user exists
     let user: UserModel = match users
         .filter(users::uuid.eq(user_uuid.to_string()))
         .select(UserModel::as_select())
@@ -743,80 +749,161 @@ pub async fn create_backup(
         }
     };
 
-    let order: NewOrder = NewOrder::new(
-        &user,
-        order_json.created_on.to_owned(),
-        order_json.delivery_charge,
-        DeliveryStatus::Pending,
-        order_json.delivery_location.to_owned(),
-        order_total,
-        order_quantity
-    );
+    if user.get_location().is_none() {
+        return HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "User's location is missing. Please update location"
+        }));
+    }
 
-    match diesel::insert_into(orders)
-        .values(&order)
-        .get_result::<OrderModel>(conn)
-    {
-        Ok(o) => {
-            //if any one of this failed, then god will help
-            for order_detail in &order_json.order_items {
-                let pr: ProductModel = match products
-                    .filter(products::uuid.eq(&order_detail.product_id))
-                    .select(ProductModel::as_select())
-                    .first(conn)
-                    .optional()
-                {
-                    Ok(Some(p)) => p,
-                    Ok(None) => {
-                        return HttpResponse::NotFound()
-                            .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Product not found"}))
-                    }
-                    Err(_) => {
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
-                    }
-                };
+    // validate cart items exists
+    let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+        let mut order_items_vec: Vec<(CartModel, ProductModel)> = vec![];
+        let mut order_total_price = 0.0;
+        let mut order_total_quantity = 0.0;
 
-                if pr.get_stock() < order_detail.quantity {
-                    return HttpResponse::BadRequest()
-                            .status(StatusCode::BAD_REQUEST)
-                            .json(serde_json::json!({"message": "Ordered product quantity is greater than stock"}));
+        for cart_id in &carts_json.cart_ids {
+            let cart: CartModel = match carts
+                .filter(carts::uuid.eq(&cart_id))
+                .first::<CartModel>(con)
+                .optional()?
+            {
+                Some(c) => c,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": format!("Cart not found: {}", cart_id)
+                    })));
                 }
+            };
 
-                let od: NewOrderItemModel =
-                    NewOrderItemModel::new(order_detail.quantity, &pr, &o);
+            let product: ProductModel = match products
+                .filter(products::uuid.eq(&cart.get_uuid()))
+                .first::<ProductModel>(con)
+                .optional()?
+            {
+                Some(p) => p,
+                None => {
+                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product not found for order"
+                    })));
+                }
+            };
 
-                diesel::insert_into(order_items)
-                    .values(&od)
-                    .execute(conn)
-                    .unwrap();
-
-                //update the product stock if order creation successful
-                diesel::update(&pr)
-                    .set(products::stock.eq(products::stock - order_detail.quantity))
-                    .execute(conn)
-                    .unwrap();
+            if product.get_stock() < cart.get_quantity() {
+                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "Product out of stock"
+                })));
             }
 
-            let order: Order = Order {
-                user_id: user_uuid.to_string(),
-                created_on: o.get_created_on().to_owned(),
-                fulfilled_on: o.get_fulfilled_on().to_owned(),
-                total_price: o.get_total_price(),
-                uuid: o.get_uuid().to_string(),
-                delivery_charge: o.get_delivery_charge(),
-                delivery_location: o.get_delivery_location().to_owned(),
-                delivery_status: o.get_delivery_status().to_owned(),
-            };
-            HttpResponse::Ok()
-                .status(StatusCode::OK)
-                .json(serde_json::json!({"order": order}))
+            order_total_price += cart.get_quantity() as f64 * product.get_price();
+            order_total_quantity += cart.get_quantity();
+
+            order_items_vec.push((cart, product));
+                       
         }
-        Err(_) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+
+        let nepal_time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        let formatted_time = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let order = NewOrder::new(
+            &user,
+            &formatted_time,
+            DELIVERY_CHARGE, //delivery charge
+            DeliveryStatus::Pending,
+            &user.get_location().unwrap().to_owned(),
+            order_total_price,
+            order_total_quantity,
+            OrderStatus::PaymentPending,
+        );
+        
+        let inserted_order: OrderModel =
+            diesel::insert_into(orders).values(&order).get_result(con)?;
+        
+        if pay_method ==  PaymentMethod::Cash {
+            let user_location = user.get_location().unwrap_or_default();
+            let shipment = NewShipment::new(user_location, &inserted_order);
+
+            diesel::insert_into(shipments::table).values(&shipment).execute(con)?;
+
+            let tran_id = Uuid::new_v4().to_string().replace('-', "");
+            let new_payment = NewPayment::new(
+                &pay_method,
+                &tran_id,
+                &user,
+                &inserted_order,
+                inserted_order.get_total_price(),
+                inserted_order.get_total_price(),
+            );
+
+            let payment = diesel::insert_into(payments::table)
+                .values(&new_payment)
+                .get_result::<PaymentModel>(con)?;
+
+
+            let new_invoice:NewInvoice = NewInvoice::new(&formatted_time, inserted_order.get_total_price(), 0.0, &inserted_order, &user, &payment);
+
+            let inserted_inv = diesel::insert_into(invoices::table).values(&new_invoice).get_result::<Invoice>(con)?;
+
+            // Now insert all order items
+            for (cart, product) in &order_items_vec {
+                let new_order_item =
+                    NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
+
+                diesel::insert_into(order_items)
+                    .values(&new_order_item)
+                    .execute(con)?;
+
+                //update the product stock if order creation successful
+                diesel::update(&product)
+                    .set(products::stock.eq(products::stock - cart.get_quantity()))
+                    .execute(con)?;
+    
+                
+                let inv_item = NewInvoiceItem::new(&product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
+                diesel::insert_into(invoice_items::table)
+                    .values(&inv_item)
+                    .execute(con)?;
+
+                //delete from cart
+                diesel::delete(&cart).execute(con)?;
+
+                return Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "Order created successfully",
+                    "order_id": &inserted_order.get_uuid()
+                })))
+
+            }
+        }
+        
+        // Now insert all order items
+        for (cart, product) in order_items_vec {
+            let new_order_item =
+                NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
+
+            diesel::insert_into(order_items)
+                .values(&new_order_item)
+                .execute(con)?;
+
+            //update the product stock if order creation successful
+            diesel::update(&product)
+                .set(products::stock.eq(products::stock - cart.get_quantity()))
+                .execute(con)?;
+ 
+            //delete from cart
+            diesel::delete(&cart).execute(con)?;
+        }
+
+        Ok(HttpResponse::Ok().json(serde_json::json!({
+            "message": "Order created successfully",
+            "order_id": inserted_order.get_uuid()
+        })))
+    });
+
+    match result {
+        Ok(response) => response,
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Failed to process order transaction"
+        })),
     }
 }
 
@@ -848,9 +935,9 @@ pub async fn edit(
         }
     };
 
-    use crate::schema::users::dsl::*;
     use crate::schema::orders::dsl::*;
-    use crate::schema::{users, orders};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{orders, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -924,10 +1011,10 @@ pub async fn edit(
     }
 }
 
-#[patch("/{order_id}/delivery-status/update")]
-pub async fn update_delivery_status(
+#[patch("/{order_id}/order-status/update")]
+pub async fn update_order_status(
     order_id: web::Path<(String,)>,
-    order_delivery_status: web::Query<OrderDeliveryStatus>,
+    order_status: web::Query<OrderStatusUpdate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     let order_uid: String = order_id.into_inner().0;
@@ -942,15 +1029,13 @@ pub async fn update_delivery_status(
         }
     };
 
-    let status: DeliveryStatus = match order_delivery_status.delivery_status.as_str() {
-        "Pending" => DeliveryStatus::Pending,
-        "On the way" => DeliveryStatus::OnTheWay,
-        "Fulfilled" => DeliveryStatus::Fulfilled,
-        "Cancelled" => DeliveryStatus::Cancelled,
-        _ => return HttpResponse::BadRequest()
+    let order_status: OrderStatus = match OrderStatus::from_str(&order_status.status) {
+        Ok(s) => s,
+        Err(e) => {
+            return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid delivery status. Valid values are 'Peding', 'Cancelled', 'On the way', 'Fulfilled'"}))
-
+                .json(serde_json::json!({"message": format!("{}", e)}))
+        }
     };
 
     //find the order
@@ -979,7 +1064,82 @@ pub async fn update_delivery_status(
     };
 
     match diesel::update(&order)
-        .set(delivery_status.eq(status.value()))
+        .set(status.eq(order_status.value()))
+        .get_result::<OrderModel>(conn)
+    {
+        Ok(o) => {
+            let order: Order = Order {
+                user_id: String::from("N/A"),
+                created_on: o.get_created_on().to_owned(),
+                fulfilled_on: o.get_fulfilled_on().to_owned(),
+                total_price: o.get_total_price(),
+                uuid: order_uid.to_string(),
+                delivery_charge: o.get_delivery_charge(),
+                delivery_location: o.get_delivery_location().to_owned(),
+                delivery_status: o.get_delivery_status().to_owned(),
+            };
+            HttpResponse::Ok().status(StatusCode::OK).json(order)
+        }
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
+#[patch("/{order_id}/delivery-status/update")]
+pub async fn update_delivery_status(
+    order_id: web::Path<(String,)>,
+    order_delivery_status: web::Query<OrderDeliveryStatus>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let order_uid: String = order_id.into_inner().0;
+
+    //check if the given id is a valid guid or not
+    let order_uid: Uuid = match Uuid::parse_str(&order_uid) {
+        Ok(o_id) => o_id,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    let deli_status = match DeliveryStatus::from_str(&order_delivery_status.delivery_status) {
+        Ok(s) => s,
+        Err(e) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": format!("{}", e)}))
+        }
+    };
+
+    //find the order
+    use crate::schema::orders::dsl::*;
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    let order: OrderModel = match orders
+        .filter(uuid.eq(&order_uid.to_string()))
+        .select(OrderModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(o)) => o,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Order not found"        }))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    match diesel::update(&order)
+        .set(delivery_status.eq(deli_status.value()))
         .get_result::<OrderModel>(conn)
     {
         Ok(o) => {

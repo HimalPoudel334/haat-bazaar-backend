@@ -73,6 +73,7 @@ diesel::table! {
         total_price -> Double,
         user_id -> Integer,
         quantity -> Double,
+        status -> Text,
     }
 }
 
@@ -86,6 +87,9 @@ diesel::table! {
         user_id -> Integer,
         order_id -> Integer,
         transaction_id -> Text,
+        tendered -> Double,
+        change -> Double,
+        discount -> Double,
     }
 }
 

@@ -10,6 +10,8 @@ pub struct ApplicationConfiguration {
     pub product_extraimages_path: String,
     pub esewa_merchant_id: String,
     pub esewa_merchant_secret: String,
+    pub khalti_pidx_url: String,
+    pub khalti_payment_verification_url: String,
     pub khalti_test_secret_key: String,
     pub khalti_test_public_key: String,
     pub khalti_live_secret_key: String,
@@ -32,6 +34,10 @@ impl ApplicationConfiguration {
             std::env::var("ESEWA_MERCHANT_ID").expect("ESEWA_MERCHANT_ID must be set");
         let esewa_merchant_secret =
             std::env::var("ESEWA_MERCHANT_SECRET").expect("ESEWA_MERCHANT_SECRET must be set");
+        let khalti_pidx_url =
+            std::env::var("KHALTI_PIDX_URL").expect("KHALTI_PIDX_URL must be set");
+        let khalti_payment_verification_url = std::env::var("KHALTI_PAYMENT_VERIFICATION_URL")
+            .expect("KHALTI_PAYMENT_VERIFICATION_URL must be set");
         let khalti_test_secret_key =
             std::env::var("KHALTI_TEST_SECRET_KEY").expect("KHALTI_TEST_SECRET_KEY must be set");
         let khalti_test_public_key =
@@ -52,6 +58,8 @@ impl ApplicationConfiguration {
             product_extraimages_path,
             esewa_merchant_id,
             esewa_merchant_secret,
+            khalti_pidx_url,
+            khalti_payment_verification_url,
             khalti_test_secret_key,
             khalti_test_public_key,
             khalti_live_secret_key,
