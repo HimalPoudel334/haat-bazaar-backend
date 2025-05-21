@@ -1,7 +1,7 @@
 use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
-use super::order_item::NewOrderItem;
+use super::{order_item::NewOrderItem, payment::Payment};
 
 #[derive(Serialize, Deserialize, Selectable, Queryable)]
 #[diesel(table_name = crate::schema::orders)]
@@ -130,4 +130,5 @@ pub struct OrderStatus {
 pub struct CartCheckout {
     pub cart_ids: Vec<String>,
     pub user_id: String,
+    pub payment_method: String,
 }

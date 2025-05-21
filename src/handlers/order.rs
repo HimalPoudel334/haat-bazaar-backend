@@ -18,6 +18,8 @@ use crate::{
     utils::uuid_validator::{self},
 };
 
+pub const DELIVERY_CHARGE: f64 = 100.0;
+
 #[get("")]
 pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
     //get a pooled connection from db
@@ -514,48 +516,39 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    // Validate the user UUID
+
+    use crate::schema::{
+        order_items, orders, products, payments, shipments, users, invoices, invoice_items,
+    };
+
     let user_uuid = match uuid_validator::validate_uuid(&order_json.user_id) {
         Ok(uid) => uid,
         Err(e) => return e,
     };
 
-    let pay_method: PaymentMethod = match PaymentMethod::from_str(&order_json.payment_method) {
+    let pay_method = match PaymentMethod::from_str(&order_json.payment_method) {
         Ok(pm) => pm,
         Err(e) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}))
+                .json(serde_json::json!({"message": e.to_string()}))
         }
     };
 
-    use crate::schema::order_items::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::payments::dsl::*;
-    use crate::schema::shipments::dsl::*;
-    use crate::schema::users::dsl::*;
-    use crate::schema::{products, users};
-
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    // Validate user existence
-    let mut order_total: f64 = 0.0;
-    let mut order_quantity: f64 = 0.0;
-    for od in &order_json.order_items {
-        order_total += od.price;
-        order_quantity += od.quantity;
-    }
+    let (order_total, order_quantity) = order_json.order_items.iter().fold(
+        (0.0, 0.0),
+        |(total, quantity), od| (total + od.price, quantity + od.quantity),
+    );
 
-    if order_total != order_json.total_price - 100.0 {
-        //the 100 is delivery charge which is hard coded for now.
+    if (order_total + DELIVERY_CHARGE) != order_json.total_price {
         return HttpResponse::BadRequest()
             .status(StatusCode::BAD_REQUEST)
             .json(serde_json::json!({"message": "Order data tempered. Price of items and order total do not match"}));
     }
 
-    let user: UserModel = match users
+    let user: UserModel = match users::table
         .filter(users::uuid.eq(user_uuid.to_string()))
         .select(UserModel::as_select())
         .first(conn)
@@ -574,27 +567,25 @@ pub async fn create(
         }
     };
 
-    // Create a new order
     let new_order = NewOrder::new(
         &user,
-        order_json.created_on.to_owned(),
+        &order_json.created_on,
         order_json.delivery_charge,
         DeliveryStatus::Pending,
-        order_json.delivery_location.to_owned(),
+        &order_json.delivery_location,
         order_total,
         order_quantity,
         OrderStatus::PaymentPending,
     );
 
-    // Insert the order and order details in a transaction
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
-        let mut prods = vec![];
-        let order: OrderModel = diesel::insert_into(orders)
+        let mut products_in_order = vec![];
+        let order: OrderModel = diesel::insert_into(orders::table)
             .values(&new_order)
             .get_result(con)?;
 
         for order_item in &order_json.order_items {
-            let product: ProductModel = match products
+            let product: ProductModel = match products::table
                 .filter(products::uuid.eq(&order_item.product_id))
                 .select(ProductModel::as_select())
                 .first(con)
@@ -614,80 +605,76 @@ pub async fn create(
                 })));
             }
 
-            let new_order_item: NewOrderItemModel =
-                NewOrderItemModel::new(order_item.quantity, &product, &order);
-
-            diesel::insert_into(order_items)
+            let new_order_item = NewOrderItemModel::new(order_item.quantity, &product, &order);
+            diesel::insert_into(order_items::table)
                 .values(&new_order_item)
                 .execute(con)?;
 
-            //update the product stock if order creation successful
             diesel::update(&product)
                 .set(products::stock.eq(products::stock - order_item.quantity))
                 .execute(con)?;
 
-            prods.push(product);
+            products_in_order.push(product);
         }
 
-        // If payment method is cash create shipment and invoice else create from payment
         if pay_method == PaymentMethod::Cash {
-            let user_location = user.get_location().unwrap_or("");
-            let shipment: NewShipment = NewShipment::new(user_location, &order);
-            diesel::insert_into(shipments)
+            let user_location = user.get_location().unwrap_or_default();
+            let shipment = NewShipment::new(user_location, &order);
+            diesel::insert_into(shipments::table)
                 .values(&shipment)
                 .execute(con)?;
 
-            //create payment
-            let tran_id = Uuid::new_v4().to_string().replace("-", "");
-            let new_payment: NewPayment = NewPayment::new(
+            let tran_id = Uuid::new_v4().to_string().replace('-', "");
+            let new_payment = NewPayment::new(
                 &pay_method,
                 &tran_id,
                 &user,
                 &order,
                 order.get_total_price(),
                 order.get_total_price(),
-            ); //amount  and tendered same same
+            );
 
-            let payment = diesel::insert_into(payments)
+            let payment = diesel::insert_into(payments::table)
                 .values(&new_payment)
                 .get_result::<PaymentModel>(con)?;
 
-            //update order status to payment completed
             diesel::update(&order)
-                .set(status.eq(OrderStatus::Processed.value()))
+                .set(orders::status.eq(OrderStatus::Processed.value()))
                 .execute(con)?;
 
-            //create invoice
-            let inv_date = chrono::Utc::now().naive_utc().format("%Y-%m-%d %H:%M:%S").to_string();
-            let new_inv: NewInvoice = NewInvoice::new(
+            let nepal_time = chrono::Utc::now()
+                .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+            let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+            let new_inv = NewInvoice::new(
                 &inv_date,
                 order.get_total_price(),
-                0.0, //vat percent
+                0.0,
                 &order,
                 &user,
-                &payment
+                &payment,
             );
 
-            let inv = diesel::insert_into(crate::schema::invoices::table)
+            let inv = diesel::insert_into(invoices::table)
                 .values(&new_inv)
                 .get_result::<Invoice>(con)?;
 
-            for prod in prods {
-                let new_inv_item: NewInvoiceItem = NewInvoiceItem::new(
+            for prod in products_in_order {
+                let new_inv_item = NewInvoiceItem::new(
                     &prod,
                     &inv,
                     prod.get_price(),
-                    0.0, //discount percent
-                    0.0, //discount amount
+                    0.0,
+                    0.0,
                 );
 
-                diesel::insert_into(crate::schema::invoice_items::table)
+                diesel::insert_into(invoice_items::table)
                     .values(&new_inv_item)
                     .execute(con)?;
             }
         }
 
-        let order_vm: Order = Order {
+        let order_vm = Order {
             user_id: user_uuid.to_string(),
             created_on: order.get_created_on().to_owned(),
             fulfilled_on: order.get_fulfilled_on().to_owned(),
@@ -714,6 +701,17 @@ pub async fn create_orders_from_cart(
     carts_json: web::Json<CartCheckout>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
+
+    let pay_method: PaymentMethod = match PaymentMethod::from_str(&carts_json.payment_method) {
+        Ok(pm) => pm,
+        Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"message": e.to_string()})),
+    };
+    
+    let user_uuid = match uuid_validator::validate_uuid(&carts_json.user_id) {
+        Ok(uid) => uid,
+        Err(e) => return e,
+    };
+
     for cart in &carts_json.cart_ids {
         match uuid_validator::validate_uuid(cart) {
             Ok(_) => (),
@@ -721,17 +719,12 @@ pub async fn create_orders_from_cart(
         };
     }
 
-    let user_uuid = match uuid_validator::validate_uuid(&carts_json.user_id) {
-        Ok(uid) => uid,
-        Err(e) => return e,
-    };
-
     use crate::schema::carts::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
     use crate::schema::users::dsl::*;
-    use crate::schema::{carts, products, users};
+    use crate::schema::{carts, products, users, payments, shipments, invoices, invoice_items};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -805,6 +798,7 @@ pub async fn create_orders_from_cart(
             order_total_quantity += cart.get_quantity();
 
             order_items_vec.push((cart, product));
+                       
         }
 
         let nepal_time = chrono::Utc::now()
@@ -813,18 +807,74 @@ pub async fn create_orders_from_cart(
 
         let order = NewOrder::new(
             &user,
-            formatted_time,
-            100.0, //delivery charge
+            &formatted_time,
+            DELIVERY_CHARGE, //delivery charge
             DeliveryStatus::Pending,
-            user.get_location().unwrap().to_owned(),
+            &user.get_location().unwrap().to_owned(),
             order_total_price,
             order_total_quantity,
             OrderStatus::PaymentPending,
         );
-
+        
         let inserted_order: OrderModel =
             diesel::insert_into(orders).values(&order).get_result(con)?;
+        
+        if pay_method ==  PaymentMethod::Cash {
+            let user_location = user.get_location().unwrap_or_default();
+            let shipment = NewShipment::new(user_location, &inserted_order);
 
+            diesel::insert_into(shipments::table).values(&shipment).execute(con)?;
+
+            let tran_id = Uuid::new_v4().to_string().replace('-', "");
+            let new_payment = NewPayment::new(
+                &pay_method,
+                &tran_id,
+                &user,
+                &inserted_order,
+                inserted_order.get_total_price(),
+                inserted_order.get_total_price(),
+            );
+
+            let payment = diesel::insert_into(payments::table)
+                .values(&new_payment)
+                .get_result::<PaymentModel>(con)?;
+
+
+            let new_invoice:NewInvoice = NewInvoice::new(&formatted_time, inserted_order.get_total_price(), 0.0, &inserted_order, &user, &payment);
+
+            let inserted_inv = diesel::insert_into(invoices::table).values(&new_invoice).get_result::<Invoice>(con)?;
+
+            // Now insert all order items
+            for (cart, product) in &order_items_vec {
+                let new_order_item =
+                    NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
+
+                diesel::insert_into(order_items)
+                    .values(&new_order_item)
+                    .execute(con)?;
+
+                //update the product stock if order creation successful
+                diesel::update(&product)
+                    .set(products::stock.eq(products::stock - cart.get_quantity()))
+                    .execute(con)?;
+    
+                
+                let inv_item = NewInvoiceItem::new(&product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
+                diesel::insert_into(invoice_items::table)
+                    .values(&inv_item)
+                    .execute(con)?;
+
+                //delete from cart
+                diesel::delete(&cart).execute(con)?;
+
+                return Ok(HttpResponse::Ok().json(serde_json::json!({
+                    "message": "Order created successfully",
+                    "order_id": &inserted_order.get_uuid()
+                })))
+
+            }
+        }
+        
         // Now insert all order items
         for (cart, product) in order_items_vec {
             let new_order_item =
@@ -838,7 +888,7 @@ pub async fn create_orders_from_cart(
             diesel::update(&product)
                 .set(products::stock.eq(products::stock - cart.get_quantity()))
                 .execute(con)?;
-
+ 
             //delete from cart
             diesel::delete(&cart).execute(con)?;
         }

@@ -55,18 +55,6 @@ pub struct EsewaCallbackResponse {
     pub transaction_details: EsewaTransactionDetails,
 }
 
-// #[derive(Serialize, Deserialize, Debug)]
-// #[serde(rename_all = "camelCase")]
-// pub struct EsewaTransactionResponse {
-//     pub product_id: String,
-//     pub product_name: String,
-//     pub total_amount: String,
-//     pub code: String,
-//     pub merchant_name: String,
-//     pub message: EsewaMessage,
-//     pub transaction_details: EsewaTransactionDetails,
-// }
-
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct KhaltiPaymentLookupResponse {
