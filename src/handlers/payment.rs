@@ -31,8 +31,12 @@ use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         invoice::{Invoice, NewInvoice},
+        invoice_item::NewInvoiceItem,
         order::Order as OrderModel,
+        order_item::OrderItem,
         payment::{NewPayment as NewPaymentModel, Payment as PaymentModel},
+        product::Product,
+        shipment::NewShipment,
         user::User as UserModel,
     },
     utils,
@@ -473,7 +477,11 @@ pub async fn create_payment(
     payment_json: web::Json<NewPayment>,
     pool: &web::Data<SqliteConnectionPool>,
 ) -> HttpResponse {
-    use crate::schema::{orders::dsl as orders_dsl, payments::dsl::*, users::dsl as users_dsl};
+    use crate::schema::{invoice_items, invoices, shipments};
+    use crate::schema::{
+        orders::dsl as orders_dsl, payments::dsl::*, products::dsl as products_dsl,
+        users::dsl as users_dsl,
+    };
     use diesel::prelude::*;
 
     let conn = &mut get_conn(pool);
@@ -575,9 +583,50 @@ pub async fn create_payment(
             payment_json.tendered,
         );
 
-        let inserted = diesel::insert_into(payments)
+        let inserted: PaymentModel = diesel::insert_into(payments)
             .values(&payment_model)
             .get_result::<PaymentModel>(con)?;
+
+        let user_location = user.get_location().unwrap_or_default();
+        let shipment = NewShipment::new(user_location, &order);
+        diesel::insert_into(shipments::table)
+            .values(&shipment)
+            .execute(con)?;
+
+        let nepal_time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let new_inv: NewInvoice = NewInvoice::new(
+            &inv_date,
+            payment_json.amount,
+            0.0,
+            &order,
+            &user,
+            &inserted,
+        );
+
+        let invoice: Invoice = diesel::insert_into(invoices::table)
+            .values(&new_inv)
+            .get_result::<Invoice>(con)?;
+
+        //extract order_items and create invoice item for each product
+        let order_items = OrderItem::belonging_to(&order)
+            .select(OrderItem::as_select())
+            .load(con)?;
+
+        for item in order_items {
+            let product = products_dsl::products
+                .find(item.get_product_id())
+                .select(Product::as_select())
+                .first(con)?; //might get runtime here but hey who cares
+
+            let inv_item = NewInvoiceItem::new(&product, &invoice, item.get_quantity(), 0.0, 0.0);
+
+            diesel::insert_into(invoice_items::table)
+                .values(&inv_item)
+                .execute(con)?;
+        }
 
         // Prepare API response
         let response = Payment {
@@ -757,4 +806,3 @@ async fn get_order_details(
             .json(serde_json::json!({"message": "Ops! something went wrong"}))),
     }
 }
-
