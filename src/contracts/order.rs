@@ -1,9 +1,9 @@
-use diesel::{deserialize::Queryable, Selectable};
+use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
-use super::{order_item::NewOrderItem, payment::Payment};
+use super::order_item::NewOrderItem;
 
-#[derive(Serialize, Deserialize, Selectable, Queryable)]
+#[derive(Serialize, Queryable)]
 #[diesel(table_name = crate::schema::orders)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {
@@ -18,8 +18,26 @@ pub struct Order {
     pub user_id: String,
 }
 
-/* Order response */
 #[derive(Serialize, Queryable)]
+pub struct AllOrderResponse {
+    #[serde(rename = "id")]
+    pub uuid: String,
+    pub created_on: String,
+    pub fulfilled_on: String,
+    pub delivery_charge: f64,
+    pub delivery_location: String,
+    pub delivery_status: String,
+    pub total_price: f64,
+    pub status: String,
+    pub quantity: f64,
+    #[diesel(column_name = "name")]
+    pub product_image: String,
+    #[diesel(column_name = "image")]
+    pub product_name: String,
+}
+
+/* Order response */
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderResponse {
     #[serde(rename = "id")]
@@ -33,6 +51,9 @@ pub struct OrderResponse {
     pub status: String,
     pub customer: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
+    pub payment_id: Option<String>,
+    pub invoice_id: Option<String>,
+    pub shipment_id: Option<String>,
 }
 
 #[derive(Serialize, Queryable)]
