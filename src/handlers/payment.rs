@@ -659,14 +659,18 @@ async fn get_order_details(
     pool: &web::Data<SqliteConnectionPool>,
 ) -> Result<OrderResponse, HttpResponse> {
     use crate::schema::categories::dsl::*;
+    use crate::schema::invoices::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
     use crate::schema::products::dsl::*;
+    use crate::schema::shipments::dsl::*;
     use crate::schema::users::dsl::*;
-    use crate::schema::{categories, order_items, orders, products, users};
+    use crate::schema::{
+        categories, invoices, order_items, orders, payments, products, shipments, users,
+    };
 
-    // Get a pooled connection from db
-    let conn = &mut get_conn(&pool);
+    let conn = &mut get_conn(pool);
 
     type OrderTuple = (
         String,
@@ -692,13 +696,19 @@ async fn get_order_details(
                 (String, String),
             ),
         ),
+        Option<String>,
+        Option<String>,
+        Option<String>,
     );
 
     match orders
-        .inner_join(users.on(user_id.eq(users::id)))
-        .inner_join(order_items.on(order_id.eq(orders::id)))
+        .inner_join(users.on(orders::user_id.eq(users::id)))
+        .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
+        .left_join(payments.on(payments::order_id.eq(orders::id)))
+        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
+        .left_join(shipments.on(invoices::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id))
         .select((
             orders::uuid,
@@ -731,6 +741,9 @@ async fn get_order_details(
                     (categories::uuid, categories::name),
                 ),
             ),
+            payments::uuid.nullable(),
+            invoices::uuid.nullable(),
+            shipments::uuid.nullable(),
         ))
         .first::<OrderTuple>(conn)
         .optional()
@@ -760,6 +773,9 @@ async fn get_order_details(
                         (category_uuid, category_name),
                     ),
                 ),
+                payment_uuid,
+                invoice_uuid,
+                shipment_uuid,
             ) = o;
 
             let ord_res: OrderResponse = OrderResponse {
@@ -796,6 +812,9 @@ async fn get_order_details(
                         },
                     },
                 }],
+                payment_id: payment_uuid,
+                invoice_id: invoice_uuid,
+                shipment_id: shipment_uuid,
             };
             Ok(ord_res)
         }

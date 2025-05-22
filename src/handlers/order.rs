@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
@@ -7,13 +9,21 @@ use crate::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
     },
     contracts::order::{
-        CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus, OrderEdit,
-        OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate, ProductResponse,
-        UserOrderResponse, UserResponse,
+        AllOrderResponse, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
+        OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
+        ProductResponse, UserOrderResponse, UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        cart::Cart as CartModel, invoice::{Invoice, NewInvoice}, invoice_item::NewInvoiceItem, order::{NewOrder, Order as OrderModel}, order_item::NewOrderItem as NewOrderItemModel, payment::{NewPayment, Payment as PaymentModel}, product::Product as ProductModel, shipment::NewShipment, user::User as UserModel
+        cart::Cart as CartModel,
+        invoice::{Invoice, NewInvoice},
+        invoice_item::NewInvoiceItem,
+        order::{NewOrder, Order as OrderModel},
+        order_item::NewOrderItem as NewOrderItemModel,
+        payment::{NewPayment, Payment as PaymentModel},
+        product::Product as ProductModel,
+        shipment::NewShipment,
+        user::User as UserModel,
     },
     utils::uuid_validator::{self},
 };
@@ -25,44 +35,14 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    use crate::schema::categories::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::users::dsl::*;
-    use crate::schema::{categories, order_items, orders, products, users};
-
-    type OrderTuple = (
-        String,
-        String,
-        String,
-        f64,
-        String,
-        String,
-        f64,
-        String,
-        (String, String, String, String, String, String),
-        (
-            String,
-            f64,
-            f64,
-            (
-                String,
-                String,
-                String,
-                String,
-                f64,
-                String,
-                (String, String),
-            ),
-        ),
-    );
+    use crate::schema::{order_items, orders, products};
 
     let orders_vec = orders
-        .inner_join(users.on(user_id.eq(users::id)))
-        .inner_join(order_items.on(order_id.eq(orders::id)))
+        .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
-        .inner_join(categories.on(products::category_id.eq(categories::id)))
         .select((
             orders::uuid,
             orders::created_on,
@@ -72,99 +52,12 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
             orders::delivery_status,
             orders::total_price,
             orders::status,
-            (
-                users::uuid,
-                users::first_name,
-                users::last_name,
-                users::phone_number,
-                users::email,
-                users::user_type,
-            ),
-            (
-                order_items::uuid,
-                order_items::quantity,
-                order_items::price,
-                (
-                    products::uuid,
-                    products::name,
-                    products::description,
-                    products::image,
-                    products::price,
-                    products::unit,
-                    (categories::uuid, categories::name),
-                ),
-            ),
+            orders::quantity,
+            products::name,
+            products::image,
         ))
-        .load::<OrderTuple>(conn)
+        .load::<AllOrderResponse>(conn)
         .expect("Error loading orders");
-
-    // Map the results to OrderN
-    let orders_vec: Vec<OrderResponse> = orders_vec
-        .into_iter()
-        .map(
-            |(
-                order_uuid,
-                order_created_on,
-                order_fulfilled_on,
-                order_delivery_charge,
-                order_delivery_location,
-                order_delivery_status,
-                order_total_price,
-                order_status,
-                (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
-                (
-                    order_item_uuid,
-                    order_item_quantity,
-                    order_item_price,
-                    (
-                        product_uuid,
-                        product_name,
-                        product_description,
-                        product_image,
-                        product_price,
-                        product_unit,
-                        (category_uuid, category_name),
-                    ),
-                ),
-            )| {
-                OrderResponse {
-                    uuid: order_uuid,
-                    created_on: order_created_on,
-                    fulfilled_on: order_fulfilled_on,
-                    delivery_charge: order_delivery_charge,
-                    delivery_location: order_delivery_location,
-                    delivery_status: order_delivery_status,
-                    total_price: order_total_price,
-                    status: order_status,
-                    customer: UserResponse {
-                        uuid: user_uuid,
-                        first_name: user_first_name,
-                        last_name: user_last_name,
-                        phone_number: user_phone_number,
-                        email: user_email,
-                        user_type: utype,
-                    },
-                    order_items: vec![OrderItemResponse {
-                        uuid: order_item_uuid,
-                        quantity: order_item_quantity,
-                        price: order_item_price,
-                        product: ProductResponse {
-                            uuid: product_uuid,
-                            name: product_name,
-                            description: product_description,
-                            image: product_image,
-                            price: product_price,
-                            unit: product_unit,
-                            category: CategoryResponse {
-                                uuid: category_uuid,
-                                name: category_name,
-                            },
-                        },
-                    }],
-                }
-            },
-        )
-        .collect::<Vec<OrderResponse>>();
 
     HttpResponse::Ok()
         .status(StatusCode::OK)
@@ -178,7 +71,6 @@ pub async fn get_order(
 ) -> impl Responder {
     let ord_id: String = ord_id.into_inner().0;
 
-    //check if the order id is a valid uuid
     let ord_id: Uuid = match Uuid::parse_str(&ord_id) {
         Ok(o) => o,
         Err(_) => {
@@ -189,13 +81,17 @@ pub async fn get_order(
     };
 
     use crate::schema::categories::dsl::*;
+    use crate::schema::invoices::dsl::*;
     use crate::schema::order_items::dsl::*;
     use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
     use crate::schema::products::dsl::*;
+    use crate::schema::shipments::dsl::*;
     use crate::schema::users::dsl::*;
-    use crate::schema::{categories, order_items, orders, products, users};
+    use crate::schema::{
+        categories, invoices, order_items, orders, payments, products, shipments, users,
+    };
 
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
     type OrderTuple = (
@@ -222,14 +118,20 @@ pub async fn get_order(
                 (String, String),
             ),
         ),
+        Option<String>,
+        Option<String>,
+        Option<String>,
     );
 
-    match orders
-        .inner_join(users.on(user_id.eq(users::id)))
-        .inner_join(order_items.on(order_id.eq(orders::id)))
+    let result = orders
+        .inner_join(users.on(orders::user_id.eq(users::id)))
+        .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .filter(orders::uuid.eq(&ord_id.to_string()))
+        .left_join(payments.on(payments::order_id.eq(orders::id)))
+        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
+        .left_join(shipments.on(invoices::order_id.eq(orders::id)))
+        .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
             orders::created_on,
@@ -261,12 +163,22 @@ pub async fn get_order(
                     (categories::uuid, categories::name),
                 ),
             ),
+            payments::uuid.nullable(),
+            invoices::uuid.nullable(),
+            shipments::uuid.nullable(),
         ))
-        .first::<OrderTuple>(conn)
-        .optional()
-    {
-        Ok(Some(o)) => {
-            let (
+        .load::<OrderTuple>(conn);
+
+    match result {
+        Ok(order_rows) if order_rows.is_empty() => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Order not found"})),
+        Ok(order_rows) => {
+            use std::collections::HashMap;
+
+            let mut map: HashMap<String, OrderResponse> = HashMap::new();
+
+            for (
                 order_uuid,
                 order_created_on,
                 order_fulfilled_on,
@@ -290,25 +202,37 @@ pub async fn get_order(
                         (category_uuid, category_name),
                     ),
                 ),
-            ) = o;
-            let ord_res: OrderResponse = OrderResponse {
-                uuid: order_uuid,
-                created_on: order_created_on,
-                fulfilled_on: order_fulfilled_on,
-                delivery_charge: order_delivery_charge,
-                delivery_location: order_delivery_location,
-                delivery_status: order_delivery_status,
-                total_price: order_total_price,
-                status: order_status,
-                customer: UserResponse {
-                    uuid: user_uuid,
-                    first_name: user_first_name,
-                    last_name: user_last_name,
-                    phone_number: user_phone_number,
-                    email: user_email,
-                    user_type: utype,
-                },
-                order_items: vec![OrderItemResponse {
+                payment_uuid,
+                invoice_uuid,
+                shipment_uuid,
+            ) in order_rows
+            {
+                let entry = map
+                    .entry(order_uuid.clone())
+                    .or_insert_with(|| OrderResponse {
+                        uuid: order_uuid,
+                        created_on: order_created_on,
+                        fulfilled_on: order_fulfilled_on,
+                        delivery_charge: order_delivery_charge,
+                        delivery_location: order_delivery_location,
+                        delivery_status: order_delivery_status,
+                        total_price: order_total_price,
+                        status: order_status,
+                        customer: UserResponse {
+                            uuid: user_uuid,
+                            first_name: user_first_name,
+                            last_name: user_last_name,
+                            phone_number: user_phone_number,
+                            email: user_email,
+                            user_type: utype,
+                        },
+                        order_items: vec![],
+                        payment_id: payment_uuid,
+                        invoice_id: invoice_uuid,
+                        shipment_id: shipment_uuid,
+                    });
+
+                entry.order_items.push(OrderItemResponse {
                     uuid: order_item_uuid,
                     quantity: order_item_quantity,
                     price: order_item_price,
@@ -324,29 +248,27 @@ pub async fn get_order(
                             name: category_name,
                         },
                     },
-                }],
-            };
-            HttpResponse::Ok().status(StatusCode::OK).json(ord_res)
+                });
+            }
+
+            // Since we're filtering by a single order ID, there should be only one entry
+            let response = map.into_iter().next().unwrap().1;
+
+            HttpResponse::Ok().status(StatusCode::OK).json(response)
         }
-        Ok(None) => HttpResponse::NotFound()
-            .status(StatusCode::NOT_FOUND)
-            .json(serde_json::json!({"message": "Order not found"})),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
-
 #[get("/user/{cust_id}")]
 pub async fn get_user_orders(
     cust_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    let cust_id: String = cust_id.into_inner().0;
+    let cust_id_str: String = cust_id.into_inner().0;
 
-    //first validate the user exists or not
-    //before that lets check whether the provided user id is a valid guid or not
-    let cust_id: Uuid = match Uuid::parse_str(&cust_id) {
+    let cust_id_uuid: Uuid = match Uuid::parse_str(&cust_id_str) {
         Ok(c) => c,
         Err(_) => {
             return HttpResponse::BadRequest()
@@ -361,12 +283,10 @@ pub async fn get_user_orders(
     use crate::schema::users::dsl::*;
     use crate::schema::{categories, order_items, orders, products, users};
 
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    //find the user for the provided user id
     let cust: UserModel = match users
-        .filter(users::uuid.eq(cust_id.to_string()))
+        .filter(users::uuid.eq(cust_id_uuid.to_string()))
         .select(UserModel::as_select())
         .first(conn)
         .optional()
@@ -410,105 +330,122 @@ pub async fn get_user_orders(
     );
 
     match OrderModel::belonging_to(&cust)
-            .inner_join(order_items.on(order_id.eq(orders::id)))
-            .inner_join(products.on(order_items::product_id.eq(products::id)))
-            .inner_join(categories.on(products::category_id.eq(categories::id)))
-            .select((
-                orders::uuid,
-                orders::created_on,
-                orders::fulfilled_on,
-                orders::delivery_charge,
-                orders::delivery_location,
-                orders::delivery_status,
-                orders::total_price,
-                orders::status,
+        .inner_join(order_items.on(order_items::order_id.eq(orders::id))) // Fix: Use order_items::order_id
+        .inner_join(products.on(order_items::product_id.eq(products::id)))
+        .inner_join(categories.on(products::category_id.eq(categories::id)))
+        .select((
+            orders::uuid,
+            orders::created_on,
+            orders::fulfilled_on,
+            orders::delivery_charge,
+            orders::delivery_location,
+            orders::delivery_status,
+            orders::total_price,
+            orders::status,
+            (
+                order_items::uuid,
+                order_items::quantity,
+                order_items::price,
                 (
-                    order_items::uuid,
-                    order_items::quantity,
-                    order_items::price,
+                    products::uuid,
+                    products::name,
+                    products::description,
+                    products::image,
+                    products::price,
+                    products::unit,
+                    (categories::uuid, categories::name),
+                ),
+            ),
+        ))
+        .load::<OrderTuple>(conn)
+    {
+        Ok(ords) => {
+            let mut grouped_orders: HashMap<String, UserOrderResponse> = HashMap::new();
+
+            for (
+                order_uuid,
+                order_created_on,
+                order_fulfilled_on,
+                order_delivery_charge,
+                order_delivery_location,
+                order_delivery_status,
+                order_total_price,
+                order_status,
+                (
+                    order_item_uuid,
+                    order_item_quantity,
+                    order_item_price,
                     (
-                        products::uuid,
-                        products::name,
-                        products::description,
-                        products::image,
-                        products::price,
-                        products::unit,
-                        (categories::uuid, categories::name),
+                        product_uuid,
+                        product_name,
+                        product_description,
+                        product_image,
+                        product_price,
+                        product_unit,
+                        (category_uuid, category_name),
                     ),
                 ),
-            ))
-            .load::<OrderTuple>(conn)
-            .optional() {
-                Ok(Some(ords)) => {
-                    let user_orders: Vec<UserOrderResponse> = ords.into_iter().map(
-                        |(
-                            order_uuid,
-                            order_created_on,
-                            order_fulfilled_on,
-                            order_delivery_charge,
-                            order_delivery_location,
-                            order_delivery_status,
-                            order_total_price,
-                            order_status,
-                            (
-                                order_item_uuid,
-                                order_item_quantity,
-                                order_item_price,
-                                (
-                                    product_uuid,
-                                    product_name,
-                                    product_description,
-                                    product_image,
-                                    product_price,
-                                    product_unit,
-                                    (category_uuid, category_name),
-                                ),
-                            ),
-                        )| {
-                            UserOrderResponse {
-                                uuid: order_uuid,
-                                created_on: order_created_on,
-                                fulfilled_on: order_fulfilled_on,
-                                delivery_charge: order_delivery_charge,
-                                delivery_location: order_delivery_location,
-                                delivery_status: order_delivery_status,
-                                total_price: order_total_price,
-                                status: order_status,
-                                order_items: vec![OrderItemResponse {
-                                    uuid: order_item_uuid,
-                                    quantity: order_item_quantity,
-                                    price: order_item_price,
-                                    product: ProductResponse {
-                                        uuid: product_uuid,
-                                        name: product_name,
-                                        description: product_description,
-                                        image: product_image,
-                                        price: product_price,
-                                        unit: product_unit,
-                                        category: CategoryResponse {
-                                            uuid: category_uuid,
-                                            name: category_name,
-                                        },
-                                    },
-                                }],
-                            }
+            ) in ords.into_iter()
+            {
+                let order_item = OrderItemResponse {
+                    uuid: order_item_uuid,
+                    quantity: order_item_quantity,
+                    price: order_item_price,
+                    product: ProductResponse {
+                        uuid: product_uuid,
+                        name: product_name,
+                        description: product_description,
+                        image: product_image,
+                        price: product_price,
+                        unit: product_unit,
+                        category: CategoryResponse {
+                            uuid: category_uuid,
+                            name: category_name,
                         },
-                    )
-                    .collect::<Vec<UserOrderResponse>>();
-                HttpResponse::Ok().status(StatusCode::OK).json(serde_json::json!({"orders": user_orders}))
-            
-                },
-                    Ok(None) => {
-                        return HttpResponse::NotFound()
-                            .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Order not found. Looks user hasn't ordered anything yet"}))
-                    }
-                    Err(_) => {
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({"message": "Ops! something went wrong"}))
-                    }
+                    },
+                };
+
+                let order_entry =
+                    grouped_orders
+                        .entry(order_uuid.clone())
+                        .or_insert_with(|| UserOrderResponse {
+                            uuid: order_uuid,
+                            created_on: order_created_on,
+                            fulfilled_on: order_fulfilled_on,
+                            delivery_charge: order_delivery_charge,
+                            delivery_location: order_delivery_location,
+                            delivery_status: order_delivery_status,
+                            total_price: order_total_price,
+                            status: order_status,
+                            order_items: Vec::new(),
+                        });
+                order_entry.order_items.push(order_item);
             }
+
+            let user_orders: Vec<UserOrderResponse> = grouped_orders.into_values().collect();
+
+            if user_orders.is_empty() {
+                return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+                    serde_json::json!({"message": "Order not found. Looks user hasn't ordered anything yet"}),
+                );
+            }
+
+            HttpResponse::Ok()
+                .status(StatusCode::OK)
+                .json(serde_json::json!({"orders": user_orders}))
+        }
+        Err(diesel::result::Error::NotFound) => {
+            // This case handles if belong_to returns no orders for the user
+            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+               serde_json::json!({"message": "Order not found. Looks user hasn't ordered anything yet"}),
+            );
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    }
 }
 
 #[post("")]
@@ -516,9 +453,8 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-
     use crate::schema::{
-        order_items, orders, products, payments, shipments, users, invoices, invoice_items,
+        invoice_items, invoices, order_items, orders, payments, products, shipments, users,
     };
 
     let user_uuid = match uuid_validator::validate_uuid(&order_json.user_id) {
@@ -537,10 +473,12 @@ pub async fn create(
 
     let conn = &mut get_conn(&pool);
 
-    let (order_total, order_quantity) = order_json.order_items.iter().fold(
-        (0.0, 0.0),
-        |(total, quantity), od| (total + od.price, quantity + od.quantity),
-    );
+    let (order_total, order_quantity) = order_json
+        .order_items
+        .iter()
+        .fold((0.0, 0.0), |(total, quantity), od| {
+            (total + od.price, quantity + od.quantity)
+        });
 
     if (order_total + DELIVERY_CHARGE) != order_json.total_price {
         return HttpResponse::BadRequest()
@@ -660,13 +598,7 @@ pub async fn create(
                 .get_result::<Invoice>(con)?;
 
             for prod in products_in_order {
-                let new_inv_item = NewInvoiceItem::new(
-                    &prod,
-                    &inv,
-                    prod.get_price(),
-                    0.0,
-                    0.0,
-                );
+                let new_inv_item = NewInvoiceItem::new(&prod, &inv, prod.get_price(), 0.0, 0.0);
 
                 diesel::insert_into(invoice_items::table)
                     .values(&new_inv_item)
@@ -701,12 +633,13 @@ pub async fn create_orders_from_cart(
     carts_json: web::Json<CartCheckout>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-
     let pay_method: PaymentMethod = match PaymentMethod::from_str(&carts_json.payment_method) {
         Ok(pm) => pm,
-        Err(e) => return HttpResponse::BadRequest().json(serde_json::json!({"message": e.to_string()})),
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({"message": e.to_string()}))
+        }
     };
-    
+
     let user_uuid = match uuid_validator::validate_uuid(&carts_json.user_id) {
         Ok(uid) => uid,
         Err(e) => return e,
@@ -724,7 +657,7 @@ pub async fn create_orders_from_cart(
     use crate::schema::orders::dsl::*;
     use crate::schema::products::dsl::*;
     use crate::schema::users::dsl::*;
-    use crate::schema::{carts, products, users, payments, shipments, invoices, invoice_items};
+    use crate::schema::{carts, invoice_items, invoices, payments, products, shipments, users};
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -798,7 +731,6 @@ pub async fn create_orders_from_cart(
             order_total_quantity += cart.get_quantity();
 
             order_items_vec.push((cart, product));
-                       
         }
 
         let nepal_time = chrono::Utc::now()
@@ -815,15 +747,17 @@ pub async fn create_orders_from_cart(
             order_total_quantity,
             OrderStatus::PaymentPending,
         );
-        
+
         let inserted_order: OrderModel =
             diesel::insert_into(orders).values(&order).get_result(con)?;
-        
-        if pay_method ==  PaymentMethod::Cash {
+
+        if pay_method == PaymentMethod::Cash {
             let user_location = user.get_location().unwrap_or_default();
             let shipment = NewShipment::new(user_location, &inserted_order);
 
-            diesel::insert_into(shipments::table).values(&shipment).execute(con)?;
+            diesel::insert_into(shipments::table)
+                .values(&shipment)
+                .execute(con)?;
 
             let tran_id = Uuid::new_v4().to_string().replace('-', "");
             let new_payment = NewPayment::new(
@@ -839,10 +773,18 @@ pub async fn create_orders_from_cart(
                 .values(&new_payment)
                 .get_result::<PaymentModel>(con)?;
 
+            let new_invoice: NewInvoice = NewInvoice::new(
+                &formatted_time,
+                inserted_order.get_total_price(),
+                0.0,
+                &inserted_order,
+                &user,
+                &payment,
+            );
 
-            let new_invoice:NewInvoice = NewInvoice::new(&formatted_time, inserted_order.get_total_price(), 0.0, &inserted_order, &user, &payment);
-
-            let inserted_inv = diesel::insert_into(invoices::table).values(&new_invoice).get_result::<Invoice>(con)?;
+            let inserted_inv = diesel::insert_into(invoices::table)
+                .values(&new_invoice)
+                .get_result::<Invoice>(con)?;
 
             // Now insert all order items
             for (cart, product) in &order_items_vec {
@@ -857,9 +799,9 @@ pub async fn create_orders_from_cart(
                 diesel::update(&product)
                     .set(products::stock.eq(products::stock - cart.get_quantity()))
                     .execute(con)?;
-    
-                
-                let inv_item = NewInvoiceItem::new(&product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
+
+                let inv_item =
+                    NewInvoiceItem::new(&product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
                 diesel::insert_into(invoice_items::table)
                     .values(&inv_item)
                     .execute(con)?;
@@ -870,11 +812,10 @@ pub async fn create_orders_from_cart(
                 return Ok(HttpResponse::Ok().json(serde_json::json!({
                     "message": "Order created successfully",
                     "order_id": &inserted_order.get_uuid()
-                })))
-
+                })));
             }
         }
-        
+
         // Now insert all order items
         for (cart, product) in order_items_vec {
             let new_order_item =
@@ -888,7 +829,7 @@ pub async fn create_orders_from_cart(
             diesel::update(&product)
                 .set(products::stock.eq(products::stock - cart.get_quantity()))
                 .execute(con)?;
- 
+
             //delete from cart
             diesel::delete(&cart).execute(con)?;
         }
