@@ -670,7 +670,7 @@ async fn get_order_details(
         categories, invoices, order_items, orders, payments, products, shipments, users,
     };
 
-    let conn = &mut get_conn(pool);
+    let conn = &mut get_conn(&pool);
 
     type OrderTuple = (
         String,
@@ -701,7 +701,7 @@ async fn get_order_details(
         Option<String>,
     );
 
-    match orders
+    let result = orders
         .inner_join(users.on(orders::user_id.eq(users::id)))
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
@@ -709,7 +709,7 @@ async fn get_order_details(
         .left_join(payments.on(payments::order_id.eq(orders::id)))
         .left_join(invoices.on(invoices::order_id.eq(orders::id)))
         .left_join(shipments.on(invoices::order_id.eq(orders::id)))
-        .filter(orders::uuid.eq(ord_id))
+        .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
             orders::created_on,
@@ -745,11 +745,18 @@ async fn get_order_details(
             invoices::uuid.nullable(),
             shipments::uuid.nullable(),
         ))
-        .first::<OrderTuple>(conn)
-        .optional()
-    {
-        Ok(Some(o)) => {
-            let (
+        .load::<OrderTuple>(conn);
+
+    match result {
+        Ok(order_rows) if order_rows.is_empty() => Err(HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Order not found"}))),
+        Ok(order_rows) => {
+            use std::collections::HashMap;
+
+            let mut map: HashMap<String, OrderResponse> = HashMap::new();
+
+            for (
                 order_uuid,
                 order_created_on,
                 order_fulfilled_on,
@@ -776,26 +783,34 @@ async fn get_order_details(
                 payment_uuid,
                 invoice_uuid,
                 shipment_uuid,
-            ) = o;
+            ) in order_rows
+            {
+                let entry = map
+                    .entry(order_uuid.clone())
+                    .or_insert_with(|| OrderResponse {
+                        uuid: order_uuid,
+                        created_on: order_created_on,
+                        fulfilled_on: order_fulfilled_on,
+                        delivery_charge: order_delivery_charge,
+                        delivery_location: order_delivery_location,
+                        delivery_status: order_delivery_status,
+                        total_price: order_total_price,
+                        status: order_status,
+                        customer: UserResponse {
+                            uuid: user_uuid,
+                            first_name: user_first_name,
+                            last_name: user_last_name,
+                            phone_number: user_phone_number,
+                            email: user_email,
+                            user_type: utype,
+                        },
+                        order_items: vec![],
+                        payment_id: payment_uuid,
+                        invoice_id: invoice_uuid,
+                        shipment_id: shipment_uuid,
+                    });
 
-            let ord_res: OrderResponse = OrderResponse {
-                uuid: order_uuid,
-                created_on: order_created_on,
-                fulfilled_on: order_fulfilled_on,
-                delivery_charge: order_delivery_charge,
-                delivery_location: order_delivery_location,
-                delivery_status: order_delivery_status,
-                total_price: order_total_price,
-                status: order_status,
-                customer: UserResponse {
-                    uuid: user_uuid,
-                    first_name: user_first_name,
-                    last_name: user_last_name,
-                    phone_number: user_phone_number,
-                    email: user_email,
-                    user_type: utype,
-                },
-                order_items: vec![OrderItemResponse {
+                entry.order_items.push(OrderItemResponse {
                     uuid: order_item_uuid,
                     quantity: order_item_quantity,
                     price: order_item_price,
@@ -811,17 +826,15 @@ async fn get_order_details(
                             name: category_name,
                         },
                     },
-                }],
-                payment_id: payment_uuid,
-                invoice_id: invoice_uuid,
-                shipment_id: shipment_uuid,
-            };
-            Ok(ord_res)
-        }
-        Ok(None) => {
-            Err(HttpResponse::NotFound().json(serde_json::json!({"message": "Order not found"})))
+                });
+            }
+
+            // Since we're filtering by a single order ID, there should be only one entry
+            let response = map.into_iter().next().unwrap().1;
+            Ok(response)
         }
         Err(_) => Err(HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"}))),
     }
 }

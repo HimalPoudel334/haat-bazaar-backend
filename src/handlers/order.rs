@@ -174,8 +174,6 @@ pub async fn get_order(
             .status(StatusCode::NOT_FOUND)
             .json(serde_json::json!({"message": "Order not found"})),
         Ok(order_rows) => {
-            use std::collections::HashMap;
-
             let mut map: HashMap<String, OrderResponse> = HashMap::new();
 
             for (
