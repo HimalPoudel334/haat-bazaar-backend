@@ -48,7 +48,7 @@ pub async fn create(
     //Location should in the below format address,city,state,country
     let is_valid_location = match &user.location {
         Some(loc) => {
-            if loc.matches(',').count() != 3 {
+            if loc.matches(',').count() != 4 {
                 false
             } else {
                 loc.split(',').all(|part| !part.trim().is_empty())
@@ -59,7 +59,7 @@ pub async fn create(
 
     if !is_valid_location {
         return HttpResponse::BadRequest().json(serde_json::json!({
-            "message": "Invalid location format. Expected: 'street, city, state, country'"
+            "message": "Invalid location format. Expected: 'zip code, street, city, state, country'"
         }));
     }
 

@@ -14,6 +14,7 @@ pub struct Shipment {
     city: String,
     state: String,
     country: String,
+    zip_code: String,
     order_id: i32,
 }
 
@@ -26,6 +27,7 @@ pub struct NewShipment {
     city: String,
     state: String,
     country: String,
+    zip_code: String,
     order_id: i32,
 }
 
@@ -35,9 +37,10 @@ impl NewShipment {
         //address should in the below format address,city,state,country
 
         let address_part = parts.get(0).unwrap_or(&"").to_string();
-        let city_part = parts.get(1).unwrap_or(&"").to_string();
-        let state_part = parts.get(2).unwrap_or(&"").to_string();
-        let country_part = parts.get(3).unwrap_or(&"").to_string();
+        let zip_code = parts.get(1).unwrap_or(&"").to_string();
+        let city_part = parts.get(2).unwrap_or(&"").to_string();
+        let state_part = parts.get(3).unwrap_or(&"").to_string();
+        let country_part = parts.get(4).unwrap_or(&"").to_string();
 
         Self {
             uuid: uuid::Uuid::new_v4().to_string(),
@@ -46,6 +49,7 @@ impl NewShipment {
             city: city_part,
             state: state_part,
             country: country_part,
+            zip_code: zip_code,
             order_id: order.get_id(),
         }
     }

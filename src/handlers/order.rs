@@ -554,8 +554,7 @@ pub async fn create(
         }
 
         if pay_method == PaymentMethod::Cash {
-            let user_location = user.get_location().unwrap_or_default();
-            let shipment = NewShipment::new(user_location, &order);
+            let shipment = NewShipment::new(&order_json.delivery_location, &order);
             diesel::insert_into(shipments::table)
                 .values(&shipment)
                 .execute(con)?;
@@ -620,8 +619,8 @@ pub async fn create(
             .json(serde_json::json!({"order": order_vm})))
     }) {
         Ok(response) => response,
-        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "message": "Failed to process order transaction"
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("Failed to process order transaction: {}", e)
         })),
     }
 }
