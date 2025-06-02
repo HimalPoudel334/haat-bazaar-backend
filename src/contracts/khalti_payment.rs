@@ -65,8 +65,8 @@ pub struct KhaltiPaymentPayload {
 
 impl KhaltiPaymentPayload {
     pub fn create(
-        return_url: String,
-        website_url: String,
+        return_url: &str,
+        website_url: &str,
         amount: f64, // in rupees
         purchase_order_id: String,
         purchase_order_name: String,
@@ -76,10 +76,9 @@ impl KhaltiPaymentPayload {
         merchant_username: String,
         merchant_extra: String,
     ) -> Self {
-
         Self {
-            return_url,
-            website_url,
+            return_url: return_url.to_string(),
+            website_url: website_url.to_string(),
             amount: (amount * 100.0) as i64,
             purchase_order_id,
             purchase_order_name,

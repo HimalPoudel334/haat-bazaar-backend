@@ -230,8 +230,8 @@ async fn verify_transaction(
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
     let url = format!(
-        "https://rc.esewa.com.np/mobile/transaction?txnRefId={}",
-        txn_ref_id
+        "{}?txnRefId={}",
+        app_config.esewa_payment_verification_url, txn_ref_id
     );
 
     // I don't know why array is returned
@@ -295,8 +295,8 @@ pub async fn khalti_payment_get_pidx(
         .collect::<Vec<ProductDetail>>();
 
     let khalti_payment_payload = KhaltiPaymentPayload::create(
-        "http://10.0.2.2:8080/payments/khalti/payment/confirmation".into(), //supply a url that can be accessed from anywhere
-        "http://10.0.2.2:8080".into(),
+        &app_config.khalti_payment_confirm_callback_url,
+        &app_config.khalti_payment_confirm_callback_webiste_url,
         order_details.total_price,
         order_details.uuid.into(),
         format!("{}'s Order", user_info.name),
@@ -384,14 +384,14 @@ pub async fn khalti_payment_confirmation(
     println!("Hit by khalti confirmation");
 
     //hit khalti lookup api for payment confirmation
-    let khalti_url = "https://a.khalti.com/api/v2/epayment/lookup";
+    // let khalti_url = "https://a.khalti.com/api/v2/epayment/lookup";
 
     let data = serde_json::json!({
         "pidx": payload.pidx
     });
 
     let khalti_response_result = client
-        .post(khalti_url)
+        .post(&app_config.khalti_payment_confirm_lookup_url)
         .header(
             AUTHORIZATION,
             &format!("key {}", &app_config.khalti_live_secret_key),
