@@ -81,6 +81,8 @@ pub async fn get_orders_count(
     filters: web::Query<OrdersFilterParams>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
+    use diesel::dsl::count;
+
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
@@ -101,8 +103,10 @@ pub async fn get_orders_count(
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .filter(orders::created_on.between(&filters.init_date, &final_date))
         .order_by(orders::created_on)
-        .count();
-    
+        .select(count(orders::id))
+        .first::<usize>(conn)
+        .expect("Error counting orders");
+
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"count": count}))
