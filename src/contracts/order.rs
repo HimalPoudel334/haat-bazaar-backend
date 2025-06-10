@@ -153,3 +153,9 @@ pub struct CartCheckout {
     pub user_id: String,
     pub payment_method: String,
 }
+
+#[derive(Deserialize)]
+pub struct OrdersFilterParams {
+    pub init_date: String,
+    pub final_date: Option<String>,
+}

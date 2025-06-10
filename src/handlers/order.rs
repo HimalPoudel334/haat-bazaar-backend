@@ -11,7 +11,7 @@ use crate::{
     contracts::order::{
         AllOrderResponse, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
         OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
-        ProductResponse, UserOrderResponse, UserResponse,
+        OrdersFilterParams, ProductResponse, UserOrderResponse, UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -31,7 +31,10 @@ use crate::{
 pub const DELIVERY_CHARGE: f64 = 100.0;
 
 #[get("")]
-pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+pub async fn get_orders(
+    filters: web::Query<OrdersFilterParams>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
@@ -40,9 +43,18 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     use crate::schema::products::dsl::*;
     use crate::schema::{order_items, orders, products};
 
+    let final_date = filters.final_date.clone().unwrap_or_else(|| {
+        let dt = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    });
+    println!("{final_date}");
+
     let orders_vec = orders
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
+        .filter(orders::created_on.between(&filters.init_date, &final_date))
+        .order_by(orders::created_on)
         .select((
             orders::uuid,
             orders::created_on,
@@ -62,6 +74,38 @@ pub async fn get_orders(pool: web::Data<SqliteConnectionPool>) -> impl Responder
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"orders": orders_vec}))
+}
+
+#[get("/count")]
+pub async fn get_orders_count(
+    filters: web::Query<OrdersFilterParams>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    use crate::schema::order_items::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{order_items, orders, products};
+
+    let final_date = filters.final_date.clone().unwrap_or_else(|| {
+        let dt = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    });
+    println!("{final_date}");
+
+    let count = orders
+        .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
+        .inner_join(products.on(order_items::product_id.eq(products::id)))
+        .filter(orders::created_on.between(&filters.init_date, &final_date))
+        .order_by(orders::created_on)
+        .count();
+    
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(serde_json::json!({"count": count}))
 }
 
 #[get("/{ord_id}")]
