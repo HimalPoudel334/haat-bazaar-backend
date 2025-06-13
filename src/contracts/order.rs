@@ -155,6 +155,7 @@ pub struct CartCheckout {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OrdersFilterParams {
     pub init_date: String,
     pub final_date: Option<String>,

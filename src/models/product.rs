@@ -69,8 +69,7 @@ impl Product {
             unit: self.unit.to_owned(),
             unit_change: self.unit_change,
             stock: self.stock,
-            category_id: category.get_uuid().to_string(),
-            category_name: category.get_name().to_string(),
+            category: crate::contracts::category::Category::new(category.get_uuid(), category.get_name()),
         }
     }
 }

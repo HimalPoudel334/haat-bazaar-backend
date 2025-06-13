@@ -13,3 +13,13 @@ pub struct Category {
     pub uuid: String,
     pub name: String,
 }
+
+impl Category {
+    pub fn new<T: Into<String>>(uuid: T, name: T) -> Self {
+        Self {
+            uuid: uuid.into(),
+            name: name.into()
+        }
+        
+    }
+}

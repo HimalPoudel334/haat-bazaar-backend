@@ -70,7 +70,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             web::scope("/admin")
                 .wrap(Auth::require_roles(&["Admin"]))
                 .service(
-                    web::scope("/categoryies")
+                    web::scope("/categories")
                         .service(category::create)
                         .service(category::edit)
                         .service(category::delete),
@@ -89,6 +89,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
                 )
                 .service(
                     web::scope("/orders")
+                        .service(order::get_orders_count)
                         .service(order::update_order_status)
                         .service(order::update_delivery_status)
                         .service(order::get_orders),

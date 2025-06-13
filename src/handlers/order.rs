@@ -104,7 +104,7 @@ pub async fn get_orders_count(
         .filter(orders::created_on.between(&filters.init_date, &final_date))
         .order_by(orders::created_on)
         .select(count(orders::id))
-        .first::<usize>(conn)
+        .first::<i64>(conn)
         .expect("Error counting orders");
 
     HttpResponse::Ok()

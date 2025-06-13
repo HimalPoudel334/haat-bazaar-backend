@@ -40,8 +40,7 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
             unit,
             unit_change,
             stock,
-            categories::uuid,
-            categories::name,
+            (categories::uuid, categories::name),
         ))
         .load::<Product>(conn);
 
@@ -157,7 +156,7 @@ pub async fn get_product(
 pub async fn edit(
     product_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
-    product_json: web::Json<Product>,
+    product_json: web::Json<ProductCreate>,
 ) -> impl Responder {
     let prod_uuid: String = product_id.into_inner().0;
 
@@ -521,3 +520,4 @@ pub async fn get_product_images_list(
         .status(StatusCode::OK)
         .json(serde_json::json!({"productImages": prod_images}))
 }
+

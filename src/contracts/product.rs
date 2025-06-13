@@ -2,6 +2,8 @@ use actix_multipart::form::{tempfile::TempFile, MultipartForm};
 use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
+use crate::contracts::category::Category;
+
 #[derive(Serialize, Deserialize, Queryable)]
 #[serde(rename_all = "camelCase")]
 pub struct Product {
@@ -15,8 +17,7 @@ pub struct Product {
     pub unit: String,
     pub unit_change: f64,
     pub stock: f64,
-    pub category_id: String,
-    pub category_name: String,
+    pub category: Category,
 }
 
 #[derive(Deserialize)]
