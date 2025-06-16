@@ -1,4 +1,4 @@
-use actix_multipart::form::{tempfile::TempFile, MultipartForm};
+use actix_multipart::form::{tempfile::TempFile, text::Text, MultipartForm};
 use diesel::deserialize::Queryable;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +22,7 @@ pub struct Product {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProductCreate {
+pub struct ProductCreateB {
     pub name: String,
     pub description: String,
     pub image: String,
@@ -44,4 +44,20 @@ pub struct UploadForm {
     pub images: Vec<TempFile>,
     #[multipart(rename = "thumbnail")]
     pub image: Option<TempFile>,
+}
+
+#[derive(MultipartForm)]
+pub struct ProductCreate {
+    pub name: Text<String>,
+    pub description: Text<String>,
+    pub image: Option<TempFile>,
+    pub price: Text<f64>,
+    #[multipart(rename = "previousPrice")]
+    pub previous_price: Text<f64>,
+    pub unit: Text<String>,
+    #[multipart(rename = "unitChange")]
+    pub unit_change: Text<f64>,
+    pub stock: Text<f64>,
+    #[multipart(rename = "categoryId")]
+    pub category_id: Text<String>,
 }

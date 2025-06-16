@@ -1,3 +1,6 @@
+use std::env;
+use std::path::Path;
+
 use ::uuid::Uuid;
 use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
@@ -56,7 +59,8 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
 
 #[post("")]
 pub async fn create(
-    product_json: web::Json<ProductCreate>,
+    MultipartForm(form): MultipartForm<ProductCreate>,
+    app_config: web::Data<ApplicationConfiguration>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::categories;
@@ -68,7 +72,7 @@ pub async fn create(
 
     //check if the provided category exists or not
     let category: CategoryModel = match categories
-        .filter(categories::uuid.eq(&product_json.category_id))
+        .filter(categories::uuid.eq(&form.category_id.0))
         .select(CategoryModel::as_select())
         .first::<CategoryModel>(conn)
         .optional()
@@ -87,15 +91,39 @@ pub async fn create(
         }
     };
 
+    let image_path = if let Some(thumbnail) = form.image {
+        let full_path = Path::new(&env::current_dir().expect("Failed to get current directory"))
+            .join(&app_config.product_thumbnail_path);
+
+        if let Err(e) = std::fs::create_dir_all(full_path) {
+            eprintln!("Failed to create directories: {:?}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Could not create image directory"
+            }));
+        }
+
+        let path = format!(
+            "{}product_{}_thumbnail.png",
+            app_config.product_thumbnail_path,
+            Uuid::new_v4().to_string().replace("-", "")
+        );
+        // Persist the file
+        thumbnail.file.persist(&path).unwrap();
+        Some(path)
+    } else {
+        None
+    };
+
+    // Now create the product, passing image_path (unwrap or default as needed)
     let product: NewProduct = NewProduct::new(
-        product_json.name.to_owned(),
-        product_json.description.to_owned(),
-        product_json.image.to_owned(),
-        product_json.price,
-        product_json.previous_price,
-        product_json.unit.to_owned(),
-        product_json.unit_change,
-        product_json.stock,
+        form.name.0.to_owned(),
+        form.description.0.to_owned(),
+        image_path.unwrap_or_default(), // <- Here is your image path
+        form.price.0,
+        form.previous_price.0,
+        form.unit.0.to_owned(),
+        form.unit_change.0,
+        form.stock.0,
         &category,
     );
 
@@ -156,7 +184,7 @@ pub async fn get_product(
 pub async fn edit(
     product_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
-    product_json: web::Json<ProductCreate>,
+    MultipartForm(form): MultipartForm<ProductCreate>,
 ) -> impl Responder {
     let prod_uuid: String = product_id.into_inner().0;
 
@@ -191,7 +219,7 @@ pub async fn edit(
 
     //validate if the category exists or not
     let category: CategoryModel = match categories
-        .filter(categories::uuid.eq(&product_json.category_id))
+        .filter(categories::uuid.eq(&form.category_id.0))
         .select(CategoryModel::as_select())
         .first(conn)
         .optional()
@@ -211,17 +239,32 @@ pub async fn edit(
         }
     };
 
+    //get the file from product.image and replace it with the incomming image. use same filename
+    if let Some(new_thumbnail) = form.image {
+        let cwd = &env::current_dir().expect("Failed to get current working directory");
+
+        let relative_path = product.get_image().trim_start_matches('/');
+
+        let full_path = Path::new(cwd).join(&relative_path);
+        println!("Attempting to save to: {:?}", full_path);
+        if let Err(err) = new_thumbnail.file.persist(&full_path) {
+            eprintln!("Failed to persist image: {:?}", err);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": "Could not save image"
+            }));
+        }
+    }
+
     //zero validation are done for now
     match diesel::update(&product)
         .set((
-            products::name.eq(&product_json.name),
-            description.eq(&product_json.description),
-            image.eq(&product_json.image),
-            price.eq(&product_json.price),
-            previous_price.eq(product_json.previous_price),
-            unit.eq(&product_json.unit),
-            unit_change.eq(product_json.unit_change),
-            stock.eq(product_json.stock),
+            products::name.eq(&form.name.0),
+            description.eq(&form.description.0),
+            price.eq(&form.price.0),
+            previous_price.eq(form.previous_price.0),
+            unit.eq(&form.unit.0),
+            unit_change.eq(form.unit_change.0),
+            stock.eq(form.stock.0),
             category_id.eq(category.get_id()),
         ))
         .get_result::<ProductModel>(conn)
@@ -520,4 +563,3 @@ pub async fn get_product_images_list(
         .status(StatusCode::OK)
         .json(serde_json::json!({"productImages": prod_images}))
 }
-
