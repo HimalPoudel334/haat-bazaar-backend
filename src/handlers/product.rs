@@ -134,7 +134,7 @@ pub async fn create(
     {
         Ok(p) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(p.as_response(&category)),
+            .json(serde_json::json!({"product": p.as_response(&category)})),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! Something went wrong"})),
@@ -271,7 +271,7 @@ pub async fn edit(
     {
         Ok(updated_product) => HttpResponse::Ok()
             .status(StatusCode::OK)
-            .json(updated_product.as_response(&category)),
+            .json(serde_json::json!({"product": updated_product.as_response(&category)})),
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message":"Ops! something went wrong!"})),
