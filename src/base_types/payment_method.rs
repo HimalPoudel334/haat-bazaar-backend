@@ -21,14 +21,16 @@ impl PaymentMethod {
     }
 
     pub fn from_str(string_value: &String) -> Result<Self, &str> {
-        match string_value.as_str() {
-            "Cash" => Ok(PaymentMethod::Cash),
-            "Esewa" => Ok(PaymentMethod::Esewa),
-            "Khalti" => Ok(PaymentMethod::Khalti),
-            "Bank Transfer" => Ok(PaymentMethod::BankTransfer),
-            "Credit Card" => Ok(PaymentMethod::CreditCard),
-            "Coupon" => Ok(PaymentMethod::Coupon),
-            _ => Err("Invalid payment method. Valid values are 'Cash', 'Esewa', 'Khalti', 'Bank Transfer', 'Credit Card' and 'Coupon'")
+        let normalized = string_value.trim().to_lowercase();
+
+        match normalized.as_str() {
+            "cash" => Ok(PaymentMethod::Cash),
+            "esewa" => Ok(PaymentMethod::Esewa),
+            "khalti" => Ok(PaymentMethod::Khalti),
+            "bank transfer" => Ok(PaymentMethod::BankTransfer),
+            "credit card" => Ok(PaymentMethod::CreditCard),
+            "coupon" => Ok(PaymentMethod::Coupon),
+            _ => Err("Invalid payment method. Valid values are 'Cash', 'Esewa', 'Khalti', 'Bank Transfer', 'Credit Card' and 'Coupon'"),
         }
     }
 }

@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod cart;
 pub mod category;
 pub mod invoice;
@@ -8,5 +9,5 @@ pub mod order_item;
 pub mod payment;
 pub mod product;
 pub mod product_image;
+pub mod shipment;
 pub mod user;
-pub mod auth;

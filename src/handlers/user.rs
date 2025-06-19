@@ -96,6 +96,7 @@ pub async fn create(
                 valid_email.get_email(),
                 user.password.to_owned(),
                 user.location.to_owned(),
+                user.nearest_landmark.to_owned(),
             ) {
                 Ok(u) => u,
                 Err(_e) => return HttpResponse::InternalServerError()
@@ -116,6 +117,7 @@ pub async fn create(
                         email: c.get_email().into(),
                         user_type: c.get_user_type().to_owned(),
                         location: c.get_location().map(|s| s.to_owned()),
+                        nearest_landmark: c.get_nearest_landmark().map(|s| s.to_owned()),
                     };
                     HttpResponse::Ok().status(StatusCode::OK).json(user_created)
                 }

@@ -1,5 +1,8 @@
 use argon2::password_hash::Error;
-use diesel::{prelude::{Identifiable, Insertable, Queryable}, Selectable};
+use diesel::{
+    prelude::{Identifiable, Insertable, Queryable},
+    Selectable,
+};
 use uuid::Uuid;
 
 use crate::{base_types::phone_number::PhoneNumber, utils::password_helper::hash_password};
@@ -16,12 +19,14 @@ pub struct User {
     email: String,
     password: String,
     user_type: String,
-    location: Option<String>
+    location: Option<String>,
+    nearest_landmark: Option<String>,
 }
 
 impl User {
     pub const USERTYPE_ADMIN: &'static str = "Admin";
     pub const USERTYPE_CUSTOMER: &'static str = "Customer";
+    pub const USERTYPE_DELIVERY: &'static str = "Delivery";
 
     pub fn new(
         id: i32,
@@ -32,6 +37,7 @@ impl User {
         email: String,
         password: String,
         location: Option<String>,
+        nearest_landmark: Option<String>,
     ) -> Self {
         Self {
             id,
@@ -41,8 +47,9 @@ impl User {
             phone_number,
             email,
             password,
-            user_type : Self::USERTYPE_CUSTOMER.to_string(),
-            location
+            user_type: Self::USERTYPE_CUSTOMER.to_string(),
+            location,
+            nearest_landmark,
         }
     }
 
@@ -89,6 +96,10 @@ impl User {
     pub fn get_location(&self) -> Option<&str> {
         self.location.as_deref()
     }
+
+    pub fn get_nearest_landmark(&self) -> Option<&str> {
+        self.nearest_landmark.as_deref()
+    }
 }
 
 #[derive(Insertable)]
@@ -103,12 +114,14 @@ pub struct NewUser {
     password: String,
     user_type: String,
     location: Option<String>,
+    nearest_landmark: Option<String>,
 }
 
 impl NewUser {
     pub const USERTYPE_ADMIN: &'static str = "Admin";
     pub const USERTYPE_CUSTOMER: &'static str = "Customer";
-    
+    pub const USERTYPE_DELIVERY: &'static str = "Delivery";
+
     pub fn new(
         first_name: String,
         last_name: String,
@@ -116,6 +129,7 @@ impl NewUser {
         email: String,
         password: String,
         location: Option<String>,
+        nearest_landmark: Option<String>,
     ) -> Result<Self, Error> {
         let hashed_password = hash_password(&password)?; // Propagate the error
         Ok(Self {
@@ -125,10 +139,9 @@ impl NewUser {
             phone_number: phone_number.get_number(),
             email,
             password: hashed_password,
-            user_type : Self::USERTYPE_CUSTOMER.to_string(),
+            user_type: Self::USERTYPE_CUSTOMER.to_string(),
             location,
+            nearest_landmark,
         })
     }
 }
-
-

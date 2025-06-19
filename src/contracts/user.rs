@@ -13,6 +13,7 @@ pub struct User {
     pub email: String,
     pub user_type: String,
     pub location: Option<String>,
+    pub nearest_landmark: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -24,4 +25,5 @@ pub struct UserCreate {
     pub email: String,
     pub password: String,
     pub location: Option<String>,
+    pub nearest_landmark: Option<String>,
 }

@@ -1,10 +1,13 @@
-use actix_web::{http::StatusCode, post, web, HttpResponse, Responder};
 use actix_web::{delete, HttpRequest};
+use actix_web::{http::StatusCode, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
 use crate::{
     config::ApplicationConfiguration,
-    contracts::{auth::{LoginCredentials, LoginResponse}, user::User},
+    contracts::{
+        auth::{LoginCredentials, LoginResponse},
+        user::User,
+    },
     db::connection::{get_conn, SqliteConnectionPool},
     models::user::User as UserModel,
     utils::{jwt_helper::create_jwt_token, password_helper::verify_password_hash},
@@ -69,17 +72,18 @@ pub async fn login(
                 user: User {
                     uuid: login_user.get_uuid().to_owned(),
                     first_name: login_user.get_first_name().to_owned(),
-                    last_name: login_user.get_last_name().to_owned(),   
+                    last_name: login_user.get_last_name().to_owned(),
                     phone_number: login_user.get_phone_number().to_owned(),
                     email: login_user.get_email().to_owned(),
                     user_type: login_user.get_user_type().to_owned(),
                     location: login_user.get_location().map(|s| s.to_owned()),
+                    nearest_landmark: login_user.get_nearest_landmark().map(|s| s.to_owned()),
                 },
             };
             HttpResponse::Ok()
                 .status(StatusCode::OK)
                 .json(serde_json::json!(login_response))
-        },
+        }
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(

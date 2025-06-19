@@ -22,7 +22,11 @@ pub struct Auth {
 
 impl Auth {
     pub fn authenticated() -> Self {
-        Auth { config: AuthConfig { required_roles: None } }
+        Auth {
+            config: AuthConfig {
+                required_roles: None,
+            },
+        }
     }
 
     pub fn require_roles(roles: &[&str]) -> Self {
@@ -74,7 +78,6 @@ where
     forward_ready!(service);
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-
         let user_opt = req.extensions().get::<UserInfo>().cloned();
 
         let service = Rc::clone(&self.service);
@@ -88,17 +91,20 @@ where
                         if required_roles.is_subset(&user_info.roles) {
                             service.call(req).await
                         } else {
-                            Err(ErrorForbidden("Insufficient permissions"))
+                            Err(ErrorForbidden(
+                                serde_json::json!({"message":"Insufficient permissions"}),
+                            ))
                         }
                     } else {
                         service.call(req).await
                     }
                 }
-                None => {
-                    Err(ErrorUnauthorized("Authentication required"))
-                }
+                None => Err(ErrorUnauthorized(
+                    serde_json::json!({"message":"Authentication required"}),
+                )),
             }
         }
         .boxed_local()
     }
 }
+

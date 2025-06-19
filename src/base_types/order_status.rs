@@ -20,15 +20,16 @@ impl OrderStatus {
     }
 
     pub fn from_str(string_value: &String) -> Result<Self, &str> {
-        match string_value.as_str(){
-            "Payment Pending" => Ok(OrderStatus::PaymentPending),
-            "Pending" => Ok(OrderStatus::Pending),
-            "Processed" => Ok(OrderStatus::Processed),
-            "Awaiting Delivery" => Ok(OrderStatus::AwaitingDelivery),
-            "Fulfilled" => Ok(OrderStatus::Fulfilled),
-            "Cancelled" => Ok(OrderStatus::Cancelled),
-            _ => Err("Invalid delivery status. Valid values are 'Pending', Payment Pending, Processed, 'Cancelled', 'Awaiting Delivery', 'Fulfilled'")
+        let normalized = string_value.trim().to_lowercase();
 
+        match normalized.as_str() {
+            "payment pending" => Ok(OrderStatus::PaymentPending),
+            "pending" => Ok(OrderStatus::Pending),
+            "processed" => Ok(OrderStatus::Processed),
+            "awaiting delivery" => Ok(OrderStatus::AwaitingDelivery),
+            "fulfilled" => Ok(OrderStatus::Fulfilled),
+            "cancelled" => Ok(OrderStatus::Cancelled),
+            _ => Err("Invalid order status. Valid values are: 'Payment Pending', 'Pending', 'Processed', 'Awaiting Delivery', 'Fulfilled', 'Cancelled'"),
         }
     }
 }

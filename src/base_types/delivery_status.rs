@@ -16,11 +16,12 @@ impl DeliveryStatus {
     }
 
     pub fn from_str(string_value: &String) -> Result<Self, &str> {
-        match string_value.as_str(){
-            "Pending" => Ok(DeliveryStatus::Pending),
-            "On the way" => Ok(DeliveryStatus::OnTheWay),
-            "Fulfilled" => Ok(DeliveryStatus::Fulfilled),
-            "Cancelled" => Ok(DeliveryStatus::Cancelled),
+        let normalized = string_value.trim().to_lowercase();
+        match normalized.as_str(){
+            "pending" => Ok(DeliveryStatus::Pending),
+            "on the way" => Ok(DeliveryStatus::OnTheWay),
+            "fulfilled" => Ok(DeliveryStatus::Fulfilled),
+            "cancelled" => Ok(DeliveryStatus::Cancelled),
             _ => Err("Invalid delivery status. Valid values are 'Peding', 'Cancelled', 'On the way', 'Fulfilled'")
 
         }

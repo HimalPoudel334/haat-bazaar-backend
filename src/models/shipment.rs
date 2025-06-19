@@ -16,6 +16,8 @@ pub struct Shipment {
     country: String,
     zip_code: String,
     order_id: i32,
+    status: String,
+    assigned_to: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -29,6 +31,8 @@ pub struct NewShipment {
     country: String,
     zip_code: String,
     order_id: i32,
+    status: String,
+    assigned_to: Option<i32>,
 }
 
 impl NewShipment {
@@ -51,6 +55,8 @@ impl NewShipment {
             country: country_part,
             zip_code: zip_code,
             order_id: order.get_id(),
+            status: order.get_delivery_status().to_string(),
+            assigned_to: None,
         }
     }
 }

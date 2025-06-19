@@ -1,9 +1,9 @@
-use diesel::deserialize::Queryable;
+use diesel::{deserialize::Queryable, Selectable};
 use serde::{Deserialize, Serialize};
 
 use super::order_item::NewOrderItem;
 
-#[derive(Serialize, Queryable)]
+#[derive(Serialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::orders)]
 #[serde(rename_all = "camelCase")]
 pub struct Order {

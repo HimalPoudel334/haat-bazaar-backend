@@ -129,6 +129,8 @@ diesel::table! {
         country -> Text,
         zip_code -> Text,
         order_id -> Integer,
+        status -> Text,
+        assigned_to -> Nullable<Integer>,
     }
 }
 
@@ -143,6 +145,7 @@ diesel::table! {
         password -> Text,
         user_type -> Text,
         location -> Nullable<Text>,
+        nearest_landmark -> Nullable<Text>,
     }
 }
 
@@ -161,6 +164,7 @@ diesel::joinable!(payments -> users (user_id));
 diesel::joinable!(product_images -> products (product_id));
 diesel::joinable!(products -> categories (category_id));
 diesel::joinable!(shipments -> orders (order_id));
+diesel::joinable!(shipments -> users (assigned_to));
 
 diesel::allow_tables_to_appear_in_same_query!(
     carts,
