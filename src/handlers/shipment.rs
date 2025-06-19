@@ -14,6 +14,9 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>, user: UserInfo) -> HttpR
 
     println!("User id is {}", user.user_id);
 
+    assert_eq!(user.roles.contains("Admin"), true);
+    assert_eq!(ShipmentStatus::Pending.value(), "Pending");
+
     let conn = &mut get_conn(&pool);
 
     let mut shipments_query = shipments::table
