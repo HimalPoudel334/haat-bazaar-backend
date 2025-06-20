@@ -35,4 +35,16 @@ impl ShipmentStatus {
             _ => Err("Invalid shipment status. Valid values are: 'Pending', 'Processed', 'Reached Delivery Facility', 'Awaiting Delivery', 'Out For Delivery', 'Fulfilled', 'Cancelled'"),
         }
     }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            ShipmentStatus::Pending,
+            ShipmentStatus::Processed,
+            ShipmentStatus::ReachedDeliveryFacility,
+            ShipmentStatus::AwaitingDelivery,
+            ShipmentStatus::OutForDelivery,
+            ShipmentStatus::Fulfilled,
+            ShipmentStatus::Cancelled,
+        ]
+    }
 }

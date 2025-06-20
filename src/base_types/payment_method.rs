@@ -33,4 +33,15 @@ impl PaymentMethod {
             _ => Err("Invalid payment method. Valid values are 'Cash', 'Esewa', 'Khalti', 'Bank Transfer', 'Credit Card' and 'Coupon'"),
         }
     }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            PaymentMethod::Cash,
+            PaymentMethod::Esewa,
+            PaymentMethod::Khalti,
+            PaymentMethod::BankTransfer,
+            PaymentMethod::Coupon,
+            PaymentMethod::CreditCard,
+        ]
+    }
 }

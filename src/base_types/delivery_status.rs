@@ -26,4 +26,13 @@ impl DeliveryStatus {
 
         }
     }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            DeliveryStatus::Pending,
+            DeliveryStatus::OnTheWay,
+            DeliveryStatus::Fulfilled,
+            DeliveryStatus::Cancelled,
+        ]
+    }
 }

@@ -14,4 +14,6 @@ pub struct Shipment {
     order_id: String,
     status: String,
     assigned_to: Option<String>,
+    first_name: Option<String>,
+    last_name: Option<String>,
 }

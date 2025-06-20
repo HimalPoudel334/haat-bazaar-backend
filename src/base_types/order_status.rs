@@ -32,4 +32,15 @@ impl OrderStatus {
             _ => Err("Invalid order status. Valid values are: 'Payment Pending', 'Pending', 'Processed', 'Awaiting Delivery', 'Fulfilled', 'Cancelled'"),
         }
     }
+
+    pub fn all() -> Vec<Self> {
+        vec![
+            OrderStatus::PaymentPending,
+            OrderStatus::Pending,
+            OrderStatus::Processed,
+            OrderStatus::AwaitingDelivery,
+            OrderStatus::Fulfilled,
+            OrderStatus::Cancelled,
+        ]
+    }
 }

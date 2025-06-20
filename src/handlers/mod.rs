@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod base_type;
 pub mod cart;
 pub mod category;
 pub mod invoice;

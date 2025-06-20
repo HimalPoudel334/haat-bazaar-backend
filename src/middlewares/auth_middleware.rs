@@ -88,7 +88,9 @@ where
                 Some(user_info) => {
                     // Check if specific roles are required
                     if let Some(required_roles) = &config.required_roles {
-                        if required_roles.is_subset(&user_info.roles) {
+                        // Do this if one user has multiple roles
+                        // if required_roles.is_subset(&user_info.roles) {
+                        if user_info.roles.is_subset(&required_roles) {
                             service.call(req).await
                         } else {
                             Err(ErrorForbidden(
@@ -107,4 +109,3 @@ where
         .boxed_local()
     }
 }
-

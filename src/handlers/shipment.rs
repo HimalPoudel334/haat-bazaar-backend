@@ -48,6 +48,8 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>, user: UserInfo) -> HttpR
             shipments::status,
             orders::uuid,
             users::uuid.nullable(),
+            users::first_name.nullable(),
+            users::last_name.nullable(),
         ))
         .load::<Shipment>(conn)
     {
