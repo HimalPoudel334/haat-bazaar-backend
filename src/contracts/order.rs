@@ -19,6 +19,7 @@ pub struct Order {
 }
 
 #[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
 pub struct AllOrderResponse {
     #[serde(rename = "id")]
     pub uuid: String,
@@ -30,9 +31,8 @@ pub struct AllOrderResponse {
     pub total_price: f64,
     pub status: String,
     pub quantity: f64,
-    #[diesel(column_name = "name")]
+    pub unit: String,
     pub product_image: String,
-    #[diesel(column_name = "image")]
     pub product_name: String,
 }
 

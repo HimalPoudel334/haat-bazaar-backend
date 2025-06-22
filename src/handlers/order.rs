@@ -65,8 +65,9 @@ pub async fn get_orders(
             orders::total_price,
             orders::status,
             orders::quantity,
-            products::name,
+            products::unit,
             products::image,
+            products::name,
         ))
         .load::<AllOrderResponse>(conn)
         .expect("Error loading orders");
