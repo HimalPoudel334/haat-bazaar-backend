@@ -51,9 +51,9 @@ pub struct OrderResponse {
     pub status: String,
     pub customer: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
-    pub payment_id: Option<String>,
+    pub payment: Option<PaymentResponse>,
+    pub shipment: Option<ShipmentResponse>,
     pub invoice_id: Option<String>,
-    pub shipment_id: Option<String>,
 }
 
 #[derive(Serialize, Queryable)]
@@ -91,9 +91,29 @@ pub struct ProductResponse {
 
 #[derive(Serialize, Queryable)]
 pub struct CategoryResponse {
+    #[serde(rename = "id")]
     pub uuid: String,
     pub name: String,
 }
+
+#[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentResponse {
+    #[serde(rename = "id")]
+    pub uuid: String,
+    pub payment_method: String,
+    pub transaction_id: String,
+    pub amount: f64,
+}
+
+#[derive(Serialize, Queryable)]
+#[serde(rename_all = "camelCase")]
+pub struct ShipmentResponse {
+    pub uuid: String,
+    pub status: String,
+    pub ship_date: String,
+}
+
 /* End */
 
 #[derive(Serialize, Queryable)]

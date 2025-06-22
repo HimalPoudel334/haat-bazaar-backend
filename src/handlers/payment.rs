@@ -1,6 +1,6 @@
 //this api should be hit by payment providers
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
@@ -21,7 +21,8 @@ use crate::{
             ProductDetail, UserInfo,
         },
         order::{
-            CategoryResponse, OrderItemResponse, OrderResponse, ProductResponse, UserResponse,
+            CategoryResponse, OrderItemResponse, OrderResponse, PaymentResponse, ProductResponse,
+            ShipmentResponse, UserResponse,
         },
         payment::{
             EsewaCallbackResponse, KhaltiPaymentConfirmPayload, KhaltiPaymentLookupResponse,
@@ -696,8 +697,8 @@ async fn get_order_details(
                 (String, String),
             ),
         ),
-        Option<String>,
-        Option<String>,
+        Option<(String, String, String, f64)>,
+        Option<(String, String, String)>,
         Option<String>,
     );
 
@@ -708,7 +709,7 @@ async fn get_order_details(
         .inner_join(categories.on(products::category_id.eq(categories::id)))
         .left_join(payments.on(payments::order_id.eq(orders::id)))
         .left_join(invoices.on(invoices::order_id.eq(orders::id)))
-        .left_join(shipments.on(invoices::order_id.eq(orders::id)))
+        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -741,9 +742,15 @@ async fn get_order_details(
                     (categories::uuid, categories::name),
                 ),
             ),
-            payments::uuid.nullable(),
+            (
+                payments::uuid,
+                payments::payment_method,
+                payments::transaction_id,
+                payments::amount,
+            )
+                .nullable(),
+            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
             invoices::uuid.nullable(),
-            shipments::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
 
@@ -752,8 +759,6 @@ async fn get_order_details(
             .status(StatusCode::NOT_FOUND)
             .json(serde_json::json!({"message": "Order not found"}))),
         Ok(order_rows) => {
-            use std::collections::HashMap;
-
             let mut map: HashMap<String, OrderResponse> = HashMap::new();
 
             for (
@@ -780,9 +785,9 @@ async fn get_order_details(
                         (category_uuid, category_name),
                     ),
                 ),
-                payment_uuid,
+                payment_opt,
+                shipment_opt,
                 invoice_uuid,
-                shipment_uuid,
             ) in order_rows
             {
                 let entry = map
@@ -805,9 +810,18 @@ async fn get_order_details(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment_id: payment_uuid,
+                        payment: payment_opt.map(|(uid, method, tran_id, amt)| PaymentResponse {
+                            uuid: uid,
+                            payment_method: method,
+                            transaction_id: tran_id,
+                            amount: amt,
+                        }),
+                        shipment: shipment_opt.map(|(uid, sts, ship_dt)| ShipmentResponse {
+                            uuid: uid,
+                            status: sts,
+                            ship_date: ship_dt,
+                        }),
                         invoice_id: invoice_uuid,
-                        shipment_id: shipment_uuid,
                     });
 
                 entry.order_items.push(OrderItemResponse {

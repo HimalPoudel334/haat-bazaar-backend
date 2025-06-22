@@ -11,7 +11,8 @@ use crate::{
     contracts::order::{
         AllOrderResponse, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
         OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
-        OrdersFilterParams, ProductResponse, UserOrderResponse, UserResponse,
+        OrdersFilterParams, PaymentResponse, ProductResponse, ShipmentResponse, UserOrderResponse,
+        UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -167,8 +168,8 @@ pub async fn get_order(
                 (String, String),
             ),
         ),
-        Option<String>,
-        Option<String>,
+        Option<(String, String, String, f64)>,
+        Option<(String, String, String)>,
         Option<String>,
     );
 
@@ -179,7 +180,7 @@ pub async fn get_order(
         .inner_join(categories.on(products::category_id.eq(categories::id)))
         .left_join(payments.on(payments::order_id.eq(orders::id)))
         .left_join(invoices.on(invoices::order_id.eq(orders::id)))
-        .left_join(shipments.on(invoices::order_id.eq(orders::id)))
+        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -212,9 +213,15 @@ pub async fn get_order(
                     (categories::uuid, categories::name),
                 ),
             ),
-            payments::uuid.nullable(),
+            (
+                payments::uuid,
+                payments::payment_method,
+                payments::transaction_id,
+                payments::amount,
+            )
+                .nullable(),
+            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
             invoices::uuid.nullable(),
-            shipments::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
 
@@ -249,9 +256,9 @@ pub async fn get_order(
                         (category_uuid, category_name),
                     ),
                 ),
-                payment_uuid,
+                payment_opt,
+                shipment_opt,
                 invoice_uuid,
-                shipment_uuid,
             ) in order_rows
             {
                 let entry = map
@@ -274,9 +281,18 @@ pub async fn get_order(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment_id: payment_uuid,
+                        payment: payment_opt.map(|(uid, method, tran_id, amt)| PaymentResponse {
+                            uuid: uid,
+                            payment_method: method,
+                            transaction_id: tran_id,
+                            amount: amt,
+                        }),
+                        shipment: shipment_opt.map(|(uid, sts, ship_dt)| ShipmentResponse {
+                            uuid: uid,
+                            status: sts,
+                            ship_date: ship_dt,
+                        }),
                         invoice_id: invoice_uuid,
-                        shipment_id: shipment_uuid,
                     });
 
                 entry.order_items.push(OrderItemResponse {
@@ -308,6 +324,7 @@ pub async fn get_order(
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
+
 #[get("/user/{cust_id}")]
 pub async fn get_user_orders(
     cust_id: web::Path<(String,)>,
