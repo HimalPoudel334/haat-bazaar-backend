@@ -22,6 +22,8 @@ pub struct Order {
     user_id: i32,
     quantity: f64,
     status: String,
+    discount: f64,
+    amount: f64,
 }
 
 impl Order {
@@ -67,6 +69,14 @@ impl Order {
     pub fn get_status(&self) -> &str {
         &self.status
     }
+
+    pub fn get_discount(&self) -> f64 {
+        self.discount
+    }
+
+    pub fn get_amount(&self) -> f64 {
+        self.amount
+    }
 }
 
 #[derive(Insertable)]
@@ -82,6 +92,8 @@ pub struct NewOrder {
     quantity: f64,
     user_id: i32,
     status: String,
+    discount: f64,
+    amount: f64,
 }
 
 impl NewOrder {
@@ -94,6 +106,7 @@ impl NewOrder {
         order_total: f64,
         quantity: f64,
         status: OrderStatus,
+        discount: f64,
     ) -> Self {
         let created_on_clone = created_on.clone();
         Self {
@@ -107,6 +120,8 @@ impl NewOrder {
             total_price: order_total + delivery_charge,
             quantity,
             status: status.value().to_owned(),
+            discount,
+            amount: order_total + delivery_charge - discount,
         }
     }
 

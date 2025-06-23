@@ -16,6 +16,7 @@ pub struct Cart {
     quantity: f64,
     sku: String,
     created_on: String,
+    discount: f64,
 }
 
 impl Cart {
@@ -40,6 +41,10 @@ impl Cart {
     }
     pub fn get_created_on(&self) -> &str {
         &self.created_on
+    }
+
+    pub fn get_discount(&self) -> f64 {
+        self.discount
     }
 }
 

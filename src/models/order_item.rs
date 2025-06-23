@@ -14,6 +14,8 @@ pub struct OrderItem {
     product_id: i32,
     order_id: i32,
     price: f64,
+    discount: f64,
+    amount: f64,
 }
 
 impl OrderItem {
@@ -40,6 +42,14 @@ impl OrderItem {
     pub fn get_product_id(&self) -> i32 {
         self.product_id
     }
+
+    pub fn get_amount(&self) -> f64 {
+        self.amount
+    }
+
+    pub fn get_discount(&self) -> f64 {
+        self.discount
+    }
 }
 
 #[derive(Insertable)]
@@ -50,16 +60,20 @@ pub struct NewOrderItem {
     product_id: i32,
     order_id: i32,
     price: f64,
+    discount: f64,
+    amount: f64,
 }
 
 impl NewOrderItem {
-    pub fn new(quantity: f64, product: &Product, order: &Order) -> Self {
+    pub fn new(quantity: f64, discount: f64, product: &Product, order: &Order) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
             quantity,
             product_id: product.get_id(),
             order_id: order.get_id(),
             price: quantity * product.get_price(),
+            discount,
+            amount: quantity * product.get_price() + discount,
         }
     }
 }

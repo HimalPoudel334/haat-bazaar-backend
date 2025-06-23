@@ -3,13 +3,13 @@ use uuid::Uuid;
 
 use crate::base_types::payment_method::PaymentMethod;
 
-use super::{user::User, order::Order};
+use super::{order::Order, user::User};
 
 #[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::payments)]
 #[diesel(belongs_to(User))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct  Payment {
+pub struct Payment {
     id: i32,
     uuid: String,
     pay_date: String,
@@ -20,7 +20,8 @@ pub struct  Payment {
     transaction_id: String,
     tendered: f64,
     change: f64,
-    discount: f64
+    discount: f64,
+    status: String,
 }
 
 impl Payment {
@@ -67,6 +68,10 @@ impl Payment {
     pub fn get_discount(&self) -> f64 {
         self.discount
     }
+
+    pub fn get_status(&self) -> &str {
+        &self.status
+    }
 }
 
 #[derive(Insertable)]
@@ -81,7 +86,8 @@ pub struct NewPayment {
     transaction_id: String,
     tendered: f64,
     change: f64,
-    discount: f64
+    discount: f64,
+    status: String,
 }
 
 impl NewPayment {
@@ -92,6 +98,7 @@ impl NewPayment {
         order: &Order,
         amount: f64,
         tendered: f64,
+        status: String,
     ) -> Self {
         Self {
             uuid: Uuid::new_v4().to_string(),
@@ -103,7 +110,8 @@ impl NewPayment {
             amount,
             tendered,
             change: tendered - amount,
-            discount: 0.0
+            discount: 0.0,
+            status,
         }
     }
 }

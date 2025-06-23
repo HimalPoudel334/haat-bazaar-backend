@@ -13,6 +13,7 @@ pub struct Payment {
     pub change: f64,
     pub discount: f64,
     pub transaction_id: String,
+    pub status: String,
 }
 
 #[derive(Deserialize)]
@@ -24,6 +25,7 @@ pub struct NewPayment {
     pub amount: f64,
     pub tendered: f64,
     pub transaction_id: Option<String>,
+    pub status: String,
 }
 
 // for esewa payment
@@ -63,7 +65,7 @@ pub struct KhaltiPaymentLookupResponse {
     pub status: String,
     pub transaction_id: String,
     pub fee: f64,
-    pub refunded: bool
+    pub refunded: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -77,5 +79,3 @@ pub struct KhaltiPaymentConfirmPayload {
     pub pidx: String,
     pub order_id: String,
 }
-
-

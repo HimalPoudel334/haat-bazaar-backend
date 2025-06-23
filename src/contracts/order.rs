@@ -51,8 +51,8 @@ pub struct OrderResponse {
     pub status: String,
     pub customer: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
-    pub payment: Option<PaymentResponse>,
-    pub shipment: Option<ShipmentResponse>,
+    pub payment: PaymentResponse,
+    pub shipment: ShipmentResponse,
     pub invoice_id: Option<String>,
 }
 
@@ -104,6 +104,7 @@ pub struct PaymentResponse {
     pub payment_method: String,
     pub transaction_id: String,
     pub amount: f64,
+    pub status: String,
 }
 
 #[derive(Serialize, Queryable)]
@@ -143,6 +144,7 @@ pub struct OrderCreate {
     pub user_id: String,
     pub order_items: Vec<NewOrderItem>,
     pub payment_method: String,
+    pub payment_status: String,
 }
 
 #[derive(Deserialize)]
@@ -172,6 +174,7 @@ pub struct CartCheckout {
     pub cart_ids: Vec<String>,
     pub user_id: String,
     pub payment_method: String,
+    pub payment_status: String,
 }
 
 #[derive(Deserialize)]

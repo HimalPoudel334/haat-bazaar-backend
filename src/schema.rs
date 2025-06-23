@@ -9,6 +9,7 @@ diesel::table! {
         quantity -> Double,
         sku -> Text,
         created_on -> Text,
+        discount -> Double,
     }
 }
 
@@ -58,6 +59,8 @@ diesel::table! {
         order_id -> Integer,
         quantity -> Double,
         price -> Double,
+        discount -> Double,
+        amount -> Double,
     }
 }
 
@@ -74,6 +77,8 @@ diesel::table! {
         user_id -> Integer,
         quantity -> Double,
         status -> Text,
+        discount -> Double,
+        amount -> Double,
     }
 }
 
@@ -90,6 +95,7 @@ diesel::table! {
         tendered -> Double,
         change -> Double,
         discount -> Double,
+        status -> Text,
     }
 }
 

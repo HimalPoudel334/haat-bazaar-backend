@@ -168,8 +168,8 @@ pub async fn get_order(
                 (String, String),
             ),
         ),
-        Option<(String, String, String, f64)>,
-        Option<(String, String, String)>,
+        (String, String, String, f64, String),
+        (String, String, String),
         Option<String>,
     );
 
@@ -178,9 +178,9 @@ pub async fn get_order(
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .left_join(payments.on(payments::order_id.eq(orders::id)))
-        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
-        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .inner_join(payments.on(payments::order_id.eq(orders::id)))
+        .inner_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .inner_join(invoices.on(invoices::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -218,9 +218,9 @@ pub async fn get_order(
                 payments::payment_method,
                 payments::transaction_id,
                 payments::amount,
-            )
-                .nullable(),
-            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
+                payments::status,
+            ),
+            (shipments::uuid, shipments::status, shipments::ship_date),
             invoices::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
@@ -256,8 +256,8 @@ pub async fn get_order(
                         (category_uuid, category_name),
                     ),
                 ),
-                payment_opt,
-                shipment_opt,
+                (payment_uuid, pay_method, tran_id, amt, pay_status),
+                (shipment_uuid, shipment_status, shipment_date),
                 invoice_uuid,
             ) in order_rows
             {
@@ -281,17 +281,18 @@ pub async fn get_order(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment: payment_opt.map(|(uid, method, tran_id, amt)| PaymentResponse {
-                            uuid: uid,
-                            payment_method: method,
+                        payment: PaymentResponse {
+                            uuid: payment_uuid,
+                            payment_method: pay_method,
                             transaction_id: tran_id,
                             amount: amt,
-                        }),
-                        shipment: shipment_opt.map(|(uid, sts, ship_dt)| ShipmentResponse {
-                            uuid: uid,
-                            status: sts,
-                            ship_date: ship_dt,
-                        }),
+                            status: pay_status,
+                        },
+                        shipment: ShipmentResponse {
+                            uuid: shipment_uuid,
+                            status: shipment_status,
+                            ship_date: shipment_date,
+                        },
                         invoice_id: invoice_uuid,
                     });
 
@@ -537,12 +538,17 @@ pub async fn create(
 
     let conn = &mut get_conn(&pool);
 
-    let (order_total, order_quantity) = order_json
-        .order_items
-        .iter()
-        .fold((0.0, 0.0), |(total, quantity), od| {
-            (total + od.price, quantity + od.quantity)
-        });
+    let (order_total, order_quantity, order_discount) =
+        order_json
+            .order_items
+            .iter()
+            .fold((0.0, 0.0, 0.0), |(total, quantity, discount), od| {
+                (
+                    total + od.price,
+                    quantity + od.quantity,
+                    discount + od.discount,
+                )
+            });
 
     if (order_total + DELIVERY_CHARGE) != order_json.total_price {
         return HttpResponse::BadRequest()
@@ -578,6 +584,7 @@ pub async fn create(
         order_total,
         order_quantity,
         OrderStatus::PaymentPending,
+        order_discount,
     );
 
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
@@ -607,7 +614,8 @@ pub async fn create(
                 })));
             }
 
-            let new_order_item = NewOrderItemModel::new(order_item.quantity, &product, &order);
+            let new_order_item =
+                NewOrderItemModel::new(order_item.quantity, order_item.discount, &product, &order);
             diesel::insert_into(order_items::table)
                 .values(&new_order_item)
                 .execute(con)?;
@@ -633,6 +641,7 @@ pub async fn create(
                 &order,
                 order.get_total_price(),
                 order.get_total_price(),
+                order_json.payment_status.to_owned(),
             );
 
             let payment = diesel::insert_into(payments::table)
@@ -756,6 +765,7 @@ pub async fn create_orders_from_cart(
         let mut order_items_vec: Vec<(CartModel, ProductModel)> = vec![];
         let mut order_total_price = 0.0;
         let mut order_total_quantity = 0.0;
+        let mut order_total_discount = 0.0;
 
         for cart_id in &carts_json.cart_ids {
             let cart: CartModel = match carts
@@ -792,6 +802,7 @@ pub async fn create_orders_from_cart(
 
             order_total_price += cart.get_quantity() as f64 * product.get_price();
             order_total_quantity += cart.get_quantity();
+            order_total_discount += cart.get_discount();
 
             order_items_vec.push((cart, product));
         }
@@ -809,6 +820,7 @@ pub async fn create_orders_from_cart(
             order_total_price,
             order_total_quantity,
             OrderStatus::PaymentPending,
+            order_total_discount,
         );
 
         let inserted_order: OrderModel =
@@ -830,6 +842,7 @@ pub async fn create_orders_from_cart(
                 &inserted_order,
                 inserted_order.get_total_price(),
                 inserted_order.get_total_price(),
+                carts_json.payment_status.to_owned(),
             );
 
             let payment = diesel::insert_into(payments::table)
@@ -851,8 +864,12 @@ pub async fn create_orders_from_cart(
 
             // Now insert all order items
             for (cart, product) in &order_items_vec {
-                let new_order_item =
-                    NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
+                let new_order_item = NewOrderItemModel::new(
+                    cart.get_quantity(),
+                    cart.get_discount(),
+                    &product,
+                    &inserted_order,
+                );
 
                 diesel::insert_into(order_items)
                     .values(&new_order_item)
@@ -881,8 +898,12 @@ pub async fn create_orders_from_cart(
 
         // Now insert all order items
         for (cart, product) in order_items_vec {
-            let new_order_item =
-                NewOrderItemModel::new(cart.get_quantity(), &product, &inserted_order);
+            let new_order_item = NewOrderItemModel::new(
+                cart.get_quantity(),
+                cart.get_discount(),
+                &product,
+                &inserted_order,
+            );
 
             diesel::insert_into(order_items)
                 .values(&new_order_item)

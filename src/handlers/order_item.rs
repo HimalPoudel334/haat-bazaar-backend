@@ -55,19 +55,6 @@ pub async fn get(
         }
     };
 
-    //get order items for order
-
-    // let all_order_items: Vec<OrderItems> = match OrderItemsModel::belonging_to(&order).select((
-    //    order_items::uuid,
-    //     order_items::price,
-    //     order_items::quantity,
-    //     order_items::product_id,
-    //
-    // )).load<OrderItems>::(conn).optional() {
-    //
-    //     };
-    //
-
     match order_items
         .inner_join(products)
         .inner_join(orders)
@@ -78,6 +65,8 @@ pub async fn get(
             orders::uuid,
             order_items::quantity,
             order_items::price,
+            order_items::amount,
+            order_items::discount,
         ))
         .load::<OrderItems>(conn)
     {
@@ -139,6 +128,8 @@ pub async fn get_order_detail(
                 product_id: prod.get_uuid().to_owned(),
                 order_id: ord.get_uuid().to_owned(),
                 quantity: od.get_quantity(),
+                amount: od.get_amount(),
+                discount: od.get_discount(),
             };
             HttpResponse::Ok().status(StatusCode::OK).json(order_det)
         }
@@ -217,7 +208,8 @@ pub async fn add_order_detail(
     };
 
     // if product and order both exists then insert the new record into order_items table
-    let od: NewOrderItemModel = NewOrderItemModel::new(ord_det.quantity, &prod_bought, &order);
+    let od: NewOrderItemModel =
+        NewOrderItemModel::new(ord_det.quantity, ord_det.discount, &prod_bought, &order);
 
     match diesel::insert_into(order_items).values(&od).execute(conn) {
         Ok(_) => HttpResponse::Ok()

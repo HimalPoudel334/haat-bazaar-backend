@@ -12,6 +12,8 @@ pub struct OrderItems {
     pub order_id: String,
     pub quantity: f64,
     pub price: f64,
+    pub amount: f64,
+    pub discount: f64,
 }
 
 #[derive(Serialize)]
@@ -23,6 +25,7 @@ pub struct OrderItemResponse {
     pub order_id: String,
     pub quantity: f64,
     pub price: f64,
+    pub discount: f64,
 }
 
 #[derive(Deserialize)]
@@ -32,4 +35,5 @@ pub struct NewOrderItem {
     pub product_id: String,
     pub order_id: Option<String>,
     pub price: f64,
+    pub discount: f64,
 }

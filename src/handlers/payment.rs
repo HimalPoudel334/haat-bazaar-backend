@@ -146,6 +146,7 @@ pub async fn get(
         change: payment.get_change(),
         discount: payment.get_discount(),
         transaction_id: payment.get_transaction_id().to_owned(),
+        status: payment.get_status().to_owned(),
     };
 
     HttpResponse::Ok()
@@ -168,31 +169,25 @@ pub async fn esewa_payment_confirmation(
     let verification_result = verify_transaction(txn_ref_id, client, app_config).await;
 
     let response: HttpResponse = match verification_result {
-        Ok(vr) => match vr.transaction_details.status.as_str() {
-            "COMPLETE" => {
-                let order_id = vr.product_id.clone();
-                let order: OrderResponse = match get_order_details(&order_id, &pool).await {
-                    Ok(o) => o,
-                    Err(http_response) => return http_response,
-                };
+        Ok(vr) => {
+            let order_id = vr.product_id.clone();
+            let order: OrderResponse = match get_order_details(&order_id, &pool).await {
+                Ok(o) => o,
+                Err(http_response) => return http_response,
+            };
 
-                let payment: NewPayment = NewPayment {
-                    payment_method: PaymentMethod::Esewa.value().to_string(),
-                    user_id: order.customer.uuid,
-                    order_id: order.uuid,
-                    amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
-                    tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
-                    transaction_id: Some(vr.transaction_details.reference_id.to_owned()),
-                };
+            let payment: NewPayment = NewPayment {
+                payment_method: PaymentMethod::Esewa.value().to_string(),
+                user_id: order.customer.uuid,
+                order_id: order.uuid,
+                amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
+                tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
+                transaction_id: Some(vr.transaction_details.reference_id.to_owned()),
+                status: vr.transaction_details.status.to_owned(),
+            };
 
-                return create_payment(web::Json(payment), &pool).await;
-            }
-            _ => HttpResponse::Ok().json(serde_json::json!({
-                "status": "success",
-                "verification": "incomplete",
-                "transaction_status": vr.transaction_details.status
-            })),
-        },
+            create_payment(web::Json(payment), &pool).await
+        }
         Err(e) => {
             eprintln!("{e:?}");
             HttpResponse::BadRequest().json(serde_json::json!({
@@ -384,9 +379,6 @@ pub async fn khalti_payment_confirmation(
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
-    //hit khalti lookup api for payment confirmation
-    // let khalti_url = "https://a.khalti.com/api/v2/epayment/lookup";
-
     let data = serde_json::json!({
         "pidx": payload.pidx
     });
@@ -409,33 +401,23 @@ pub async fn khalti_payment_confirmation(
                 Ok(khalti_response) => {
                     println!("Confirmation response: {:?}", khalti_response);
 
-                    match khalti_response.status.as_str() {
-                        "Completed" => {
-                            let order: OrderResponse =
-                                match get_order_details(&payload.order_id, &pool).await {
-                                    Ok(o) => o,
-                                    Err(http_response) => return http_response,
-                                };
+                    let order: OrderResponse =
+                        match get_order_details(&payload.order_id, &pool).await {
+                            Ok(o) => o,
+                            Err(http_response) => return http_response,
+                        };
 
-                            let payment: NewPayment = NewPayment {
-                                payment_method: PaymentMethod::Khalti.value().to_string(),
-                                user_id: order.customer.uuid,
-                                order_id: order.uuid,
-                                amount: khalti_response.total_amount,
-                                tendered: khalti_response.total_amount, // Same as amount
-                                transaction_id: Some(khalti_response.transaction_id.to_owned()),
-                            };
+                    let payment: NewPayment = NewPayment {
+                        payment_method: PaymentMethod::Khalti.value().to_string(),
+                        user_id: order.customer.uuid,
+                        order_id: order.uuid,
+                        amount: khalti_response.total_amount,
+                        tendered: khalti_response.total_amount, // Same as amount
+                        transaction_id: Some(khalti_response.transaction_id.to_owned()),
+                        status: khalti_response.status,
+                    };
 
-                            return create_payment(web::Json(payment), &pool).await;
-                        }
-                        _ => {
-                            return HttpResponse::BadRequest()
-                                .status(StatusCode::BAD_REQUEST)
-                                .json(serde_json::json!({
-                                    "message": "Payment is not completed"
-                                }));
-                        }
-                    }
+                    create_payment(web::Json(payment), &pool).await
                 }
                 Err(er) => {
                     eprintln!("{er}");
@@ -582,6 +564,7 @@ pub async fn create_payment(
             &order,
             payment_json.amount,
             payment_json.tendered,
+            payment_json.status.to_owned(),
         );
 
         let inserted: PaymentModel = diesel::insert_into(payments)
@@ -641,6 +624,7 @@ pub async fn create_payment(
             tendered: inserted.get_tendered(),
             change: inserted.get_change(),
             discount: inserted.get_discount(),
+            status: inserted.get_status().to_owned(),
         };
 
         Ok(HttpResponse::Ok().json(response))
@@ -697,8 +681,8 @@ async fn get_order_details(
                 (String, String),
             ),
         ),
-        Option<(String, String, String, f64)>,
-        Option<(String, String, String)>,
+        (String, String, String, f64, String),
+        (String, String, String),
         Option<String>,
     );
 
@@ -707,9 +691,9 @@ async fn get_order_details(
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .left_join(payments.on(payments::order_id.eq(orders::id)))
-        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
-        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .inner_join(payments.on(payments::order_id.eq(orders::id)))
+        .inner_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .inner_join(invoices.on(invoices::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -747,9 +731,9 @@ async fn get_order_details(
                 payments::payment_method,
                 payments::transaction_id,
                 payments::amount,
-            )
-                .nullable(),
-            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
+                payments::status,
+            ),
+            (shipments::uuid, shipments::status, shipments::ship_date),
             invoices::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
@@ -785,8 +769,8 @@ async fn get_order_details(
                         (category_uuid, category_name),
                     ),
                 ),
-                payment_opt,
-                shipment_opt,
+                (payment_uuid, pay_method, tran_id, amt, pay_status),
+                (shipment_uuid, shipment_status, shipment_date),
                 invoice_uuid,
             ) in order_rows
             {
@@ -810,17 +794,18 @@ async fn get_order_details(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment: payment_opt.map(|(uid, method, tran_id, amt)| PaymentResponse {
-                            uuid: uid,
-                            payment_method: method,
+                        payment: PaymentResponse {
+                            uuid: payment_uuid,
+                            payment_method: pay_method,
                             transaction_id: tran_id,
                             amount: amt,
-                        }),
-                        shipment: shipment_opt.map(|(uid, sts, ship_dt)| ShipmentResponse {
-                            uuid: uid,
-                            status: sts,
-                            ship_date: ship_dt,
-                        }),
+                            status: pay_status,
+                        },
+                        shipment: ShipmentResponse {
+                            uuid: shipment_uuid,
+                            status: shipment_status,
+                            ship_date: shipment_date,
+                        },
                         invoice_id: invoice_uuid,
                     });
 
