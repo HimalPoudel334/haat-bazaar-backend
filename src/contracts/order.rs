@@ -1,4 +1,5 @@
-use diesel::{deserialize::Queryable, Selectable};
+use diesel::sql_types::{Double, Integer, Text};
+use diesel::{deserialize::Queryable, prelude::QueryableByName, sqlite::Sqlite, Selectable};
 use serde::{Deserialize, Serialize};
 
 use super::order_item::NewOrderItem;
@@ -29,11 +30,62 @@ pub struct AllOrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
+    pub discount: f64,
+    pub amount: f64,
     pub status: String,
     pub quantity: f64,
     pub unit: String,
     pub product_image: String,
     pub product_name: String,
+}
+
+#[derive(Debug, QueryableByName)]
+#[diesel(check_for_backend(Sqlite))]
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AllOrderResponse1 {
+    #[diesel(sql_type = Text)]
+    #[serde(rename = "id")]
+    pub uuid: String,
+
+    #[diesel(sql_type = Text)]
+    pub created_on: String,
+
+    #[diesel(sql_type = Text)]
+    pub fulfilled_on: String,
+
+    #[diesel(sql_type = Double)]
+    pub delivery_charge: f64,
+
+    #[diesel(sql_type = Text)]
+    pub delivery_location: String,
+
+    #[diesel(sql_type = Text)]
+    pub delivery_status: String,
+
+    #[diesel(sql_type = Double)]
+    pub total_price: f64,
+
+    #[diesel(sql_type = Double)]
+    pub discount: f64,
+
+    #[diesel(sql_type = Double)]
+    pub amount: f64,
+
+    #[diesel(sql_type = Text)]
+    pub status: String,
+
+    #[diesel(sql_type = Integer)]
+    pub quantity: i32,
+
+    #[diesel(sql_type = Text)]
+    pub unit: String,
+
+    #[diesel(sql_type = Text)]
+    pub image: String,
+
+    #[diesel(sql_type = Text)]
+    pub name: String,
 }
 
 /* Order response */
@@ -48,11 +100,13 @@ pub struct OrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
+    pub discount: f64,
+    pub amount: f64,
     pub status: String,
-    pub customer: UserResponse,
+    pub user: UserResponse,
     pub order_items: Vec<OrderItemResponse>,
-    pub payment: PaymentResponse,
-    pub shipment: ShipmentResponse,
+    pub payment: Option<PaymentResponse>,
+    pub shipment: Option<ShipmentResponse>,
     pub invoice_id: Option<String>,
 }
 
@@ -75,6 +129,8 @@ pub struct OrderItemResponse {
     pub product: ProductResponse,
     pub quantity: f64,
     pub price: f64,
+    pub discount: f64,
+    pub amount: f64,
 }
 
 #[derive(Serialize, Queryable)]
@@ -128,6 +184,8 @@ pub struct UserOrderResponse {
     pub delivery_location: String,
     pub delivery_status: String,
     pub total_price: f64,
+    pub discount: f64,
+    pub amount: f64,
     pub status: String,
     pub order_items: Vec<OrderItemResponse>,
 }
@@ -143,8 +201,14 @@ pub struct OrderCreate {
     pub total_price: f64,
     pub user_id: String,
     pub order_items: Vec<NewOrderItem>,
+    pub payment: PaymentDetails,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentDetails {
     pub payment_method: String,
-    pub payment_status: String,
+    pub status: String,
 }
 
 #[derive(Deserialize)]

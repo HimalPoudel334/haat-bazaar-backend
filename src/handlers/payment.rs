@@ -145,7 +145,7 @@ pub async fn get(
         tendered: payment.get_tendered(),
         change: payment.get_change(),
         discount: payment.get_discount(),
-        transaction_id: payment.get_transaction_id().to_owned(),
+        transaction_id: Some(payment.get_transaction_id().to_owned()),
         status: payment.get_status().to_owned(),
     };
 
@@ -178,7 +178,7 @@ pub async fn esewa_payment_confirmation(
 
             let payment: NewPayment = NewPayment {
                 payment_method: PaymentMethod::Esewa.value().to_string(),
-                user_id: order.customer.uuid,
+                user_id: order.user.uuid,
                 order_id: order.uuid,
                 amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
                 tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
@@ -270,10 +270,10 @@ pub async fn khalti_payment_get_pidx(
     let user_info = UserInfo {
         name: format!(
             "{} {}",
-            order_details.customer.first_name, order_details.customer.last_name
+            order_details.user.first_name, order_details.user.last_name
         ),
-        email: order_details.customer.email,
-        phone: order_details.customer.phone_number,
+        email: order_details.user.email,
+        phone: order_details.user.phone_number,
     };
 
     let product_details = order_details
@@ -379,6 +379,11 @@ pub async fn khalti_payment_confirmation(
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
+    use crate::schema::payments;
+    use crate::schema::payments::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
     let data = serde_json::json!({
         "pidx": payload.pidx
     });
@@ -407,17 +412,61 @@ pub async fn khalti_payment_confirmation(
                             Err(http_response) => return http_response,
                         };
 
-                    let payment: NewPayment = NewPayment {
-                        payment_method: PaymentMethod::Khalti.value().to_string(),
-                        user_id: order.customer.uuid,
-                        order_id: order.uuid,
-                        amount: khalti_response.total_amount,
-                        tendered: khalti_response.total_amount, // Same as amount
-                        transaction_id: Some(khalti_response.transaction_id.to_owned()),
-                        status: khalti_response.status,
+                    // update the payment
+                    let payment: PaymentModel = match payments
+                        .filter(payments::uuid.eq(&payload.payment_id))
+                        .select(PaymentModel::as_select())
+                        .first(conn)
+                        .optional()
+                    {
+                        Ok(Some(p)) => p,
+                        Ok(None) => {
+                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+                                serde_json::json!({"message": "Payment not found for order."}),
+                            )
+                        }
+                        Err(_) => {
+                            return HttpResponse::InternalServerError()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .json(serde_json::json!({"message": "ops! something went wrong"}))
+                        }
                     };
 
-                    create_payment(web::Json(payment), &pool).await
+                    match diesel::update(&payment)
+                        .set((
+                            payments::transaction_id.eq(khalti_response
+                                .transaction_id
+                                .as_deref()
+                                .unwrap_or_default()),
+                            payments::status.eq(&khalti_response.status),
+                        ))
+                        .execute(conn)
+                    {
+                        Ok(_) => {}
+                        Err(_) => {
+                            return HttpResponse::InternalServerError()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .json(serde_json::json!({"message": "ops! something went wrong"}))
+                        }
+                    }
+
+                    let response = Payment {
+                        uuid: payment.get_uuid().to_owned(),
+                        payment_method: payment.get_payment_method().to_owned(),
+                        pay_date: payment.get_pay_date().to_owned(),
+                        user_id: order.user.uuid.to_owned(),
+                        order_id: order.uuid.to_owned(),
+                        amount: payment.get_amount(),
+                        transaction_id: khalti_response.transaction_id,
+                        tendered: payment.get_tendered(),
+                        change: payment.get_change(),
+                        discount: payment.get_discount(),
+                        status: payment.get_status().to_owned(),
+                    };
+
+                    HttpResponse::Ok()
+                        .status(StatusCode::OK)
+                        .json(serde_json::json!({"payment": response}))
                 }
                 Err(er) => {
                     eprintln!("{er}");
@@ -430,10 +479,14 @@ pub async fn khalti_payment_confirmation(
             },
             _ => match res.json::<serde_json::Value>().await {
                 Ok(v) => {
-                    println!("Error response: {v}");
-                    return HttpResponse::Unauthorized()
-                        .status(StatusCode::UNAUTHORIZED)
-                        .json(v);
+                    println!("Failed verification: {v}");
+
+                    return HttpResponse::BadRequest()
+                        .status(StatusCode::BAD_REQUEST)
+                        .json(serde_json::json!({
+                            "message": "Payment verification failed",
+                            "details": v
+                        }));
                 }
                 Err(e) => {
                     eprintln!("{e}");
@@ -620,7 +673,7 @@ pub async fn create_payment(
             user_id: user.get_uuid().to_owned(),
             order_id: order.get_uuid().to_owned(),
             amount: inserted.get_amount(),
-            transaction_id: inserted.get_transaction_id().to_owned(),
+            transaction_id: Some(inserted.get_transaction_id().to_owned()),
             tendered: inserted.get_tendered(),
             change: inserted.get_change(),
             discount: inserted.get_discount(),
@@ -665,10 +718,14 @@ async fn get_order_details(
         String,
         String,
         f64,
+        f64,
+        f64,
         String,
         (String, String, String, String, String, String),
         (
             String,
+            f64,
+            f64,
             f64,
             f64,
             (
@@ -681,8 +738,8 @@ async fn get_order_details(
                 (String, String),
             ),
         ),
-        (String, String, String, f64, String),
-        (String, String, String),
+        Option<(String, String, String, f64, String)>,
+        Option<(String, String, String)>,
         Option<String>,
     );
 
@@ -691,9 +748,9 @@ async fn get_order_details(
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .inner_join(payments.on(payments::order_id.eq(orders::id)))
-        .inner_join(shipments.on(shipments::order_id.eq(orders::id)))
-        .inner_join(invoices.on(invoices::order_id.eq(orders::id)))
+        .left_join(payments.on(payments::order_id.eq(orders::id)))
+        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -703,6 +760,8 @@ async fn get_order_details(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::discount,
+            orders::amount,
             orders::status,
             (
                 users::uuid,
@@ -716,6 +775,8 @@ async fn get_order_details(
                 order_items::uuid,
                 order_items::quantity,
                 order_items::price,
+                order_items::discount,
+                order_items::amount,
                 (
                     products::uuid,
                     products::name,
@@ -732,8 +793,9 @@ async fn get_order_details(
                 payments::transaction_id,
                 payments::amount,
                 payments::status,
-            ),
-            (shipments::uuid, shipments::status, shipments::ship_date),
+            )
+                .nullable(),
+            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
             invoices::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
@@ -753,12 +815,16 @@ async fn get_order_details(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_total_discount,
+                order_total_amount,
                 order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
                     order_item_quantity,
                     order_item_price,
+                    order_item_discount,
+                    order_item_amount,
                     (
                         product_uuid,
                         product_name,
@@ -769,8 +835,8 @@ async fn get_order_details(
                         (category_uuid, category_name),
                     ),
                 ),
-                (payment_uuid, pay_method, tran_id, amt, pay_status),
-                (shipment_uuid, shipment_status, shipment_date),
+                payment_opt,
+                shipment_opt,
                 invoice_uuid,
             ) in order_rows
             {
@@ -784,8 +850,10 @@ async fn get_order_details(
                         delivery_location: order_delivery_location,
                         delivery_status: order_delivery_status,
                         total_price: order_total_price,
+                        discount: order_total_discount,
+                        amount: order_total_amount,
                         status: order_status,
-                        customer: UserResponse {
+                        user: UserResponse {
                             uuid: user_uuid,
                             first_name: user_first_name,
                             last_name: user_last_name,
@@ -794,18 +862,22 @@ async fn get_order_details(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment: PaymentResponse {
-                            uuid: payment_uuid,
-                            payment_method: pay_method,
-                            transaction_id: tran_id,
-                            amount: amt,
-                            status: pay_status,
-                        },
-                        shipment: ShipmentResponse {
-                            uuid: shipment_uuid,
-                            status: shipment_status,
-                            ship_date: shipment_date,
-                        },
+                        payment: payment_opt.map(|(pay_uuid, method, tran_id, amt, pay_status)| {
+                            PaymentResponse {
+                                uuid: pay_uuid,
+                                payment_method: method,
+                                transaction_id: tran_id,
+                                amount: amt,
+                                status: pay_status,
+                            }
+                        }),
+                        shipment: shipment_opt.map(|(ship_uuid, ship_status, ship_dt)| {
+                            ShipmentResponse {
+                                uuid: ship_uuid,
+                                status: ship_status,
+                                ship_date: ship_dt,
+                            }
+                        }),
                         invoice_id: invoice_uuid,
                     });
 
@@ -813,6 +885,8 @@ async fn get_order_details(
                     uuid: order_item_uuid,
                     quantity: order_item_quantity,
                     price: order_item_price,
+                    discount: order_item_discount,
+                    amount: order_item_amount,
                     product: ProductResponse {
                         uuid: product_uuid,
                         name: product_name,

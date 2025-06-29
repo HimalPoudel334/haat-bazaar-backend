@@ -7,9 +7,10 @@ use diesel::prelude::*;
 use crate::{
     base_types::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
+        payment_status::PaymentStatus,
     },
     contracts::order::{
-        AllOrderResponse, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
+        AllOrderResponse1, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
         OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
         OrdersFilterParams, PaymentResponse, ProductResponse, ShipmentResponse, UserOrderResponse,
         UserResponse,
@@ -38,44 +39,86 @@ pub async fn get_orders(
 ) -> impl Responder {
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
-
-    use crate::schema::order_items::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::{order_items, orders, products};
-
+    //
+    // use crate::schema::order_items::dsl::*;
+    // use crate::schema::orders::dsl::*;
+    // use crate::schema::products::dsl::*;
+    // use crate::schema::{order_items, orders, products};
+    //
     let final_date = filters.final_date.clone().unwrap_or_else(|| {
         let dt = chrono::Utc::now()
             .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     });
-    println!("{final_date}");
 
-    let orders_vec = orders
-        .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
-        .inner_join(products.on(order_items::product_id.eq(products::id)))
-        .filter(orders::created_on.between(&filters.init_date, &final_date))
-        .order_by(orders::created_on)
-        .select((
-            orders::uuid,
-            orders::created_on,
-            orders::fulfilled_on,
-            orders::delivery_charge,
-            orders::delivery_location,
-            orders::delivery_status,
-            orders::total_price,
-            orders::status,
-            orders::quantity,
-            products::unit,
-            products::image,
-            products::name,
-        ))
-        .load::<AllOrderResponse>(conn)
-        .expect("Error loading orders");
+    // let orders_vec = orders
+    //     .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
+    //     .inner_join(products.on(order_items::product_id.eq(products::id)))
+    //     .filter(orders::created_on.between(&filters.init_date, &final_date))
+    //     .order_by(orders::created_on)
+    //     .select((
+    //         orders::uuid,
+    //         orders::created_on,
+    //         orders::fulfilled_on,
+    //         orders::delivery_charge,
+    //         orders::delivery_location,
+    //         orders::delivery_status,
+    //         orders::total_price,
+    //         orders::discount,
+    //         orders::amount,
+    //         orders::status,
+    //         orders::quantity,
+    //         products::unit,
+    //         products::image,
+    //         products::name,
+    //     ))
+    //     .load::<AllOrderResponse>(conn)
+    //     .expect("Error loading orders");
 
-    HttpResponse::Ok()
-        .status(StatusCode::OK)
-        .json(serde_json::json!({"orders": orders_vec}))
+    //Wrote raw sql so that we could get only one product per order even if the order has multiple
+    //products
+    let results = diesel::sql_query(
+        r#"
+        SELECT
+            o.uuid,
+            o.created_on,
+            o.fulfilled_on,
+            o.delivery_charge,
+            o.delivery_location,
+            o.delivery_status,
+            o.total_price,
+            o.discount,
+            o.amount,
+            o.status,
+            o.quantity,
+            p.unit,
+            p.image,
+            p.name
+        FROM orders o
+        JOIN order_items oi ON oi.order_id = o.id
+        JOIN products p ON p.id = oi.product_id
+        WHERE (o.id, oi.product_id) IN (
+            SELECT order_id, MIN(product_id)
+            FROM order_items
+            GROUP BY order_id
+        )
+        AND o.created_on BETWEEN ? AND ?
+        ORDER BY o.created_on;
+    "#,
+    )
+    .bind::<diesel::sql_types::Text, _>(filters.init_date.clone())
+    .bind::<diesel::sql_types::Text, _>(final_date)
+    .load::<AllOrderResponse1>(conn);
+
+    match results {
+        Ok(r) =>
+            HttpResponse::Ok()
+                .status(StatusCode::OK)
+                .json(serde_json::json!({"orders": r})),
+    Err(e) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": format!("Ops! something went wrong when fetching orders: {}", e)}))
+    }
 }
 
 #[get("/count")]
@@ -152,10 +195,14 @@ pub async fn get_order(
         String,
         String,
         f64,
+        f64,
+        f64,
         String,
         (String, String, String, String, String, String),
         (
             String,
+            f64,
+            f64,
             f64,
             f64,
             (
@@ -168,8 +215,8 @@ pub async fn get_order(
                 (String, String),
             ),
         ),
-        (String, String, String, f64, String),
-        (String, String, String),
+        Option<(String, String, String, f64, String)>,
+        Option<(String, String, String)>,
         Option<String>,
     );
 
@@ -178,9 +225,9 @@ pub async fn get_order(
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
         .inner_join(products.on(order_items::product_id.eq(products::id)))
         .inner_join(categories.on(products::category_id.eq(categories::id)))
-        .inner_join(payments.on(payments::order_id.eq(orders::id)))
-        .inner_join(shipments.on(shipments::order_id.eq(orders::id)))
-        .inner_join(invoices.on(invoices::order_id.eq(orders::id)))
+        .left_join(payments.on(payments::order_id.eq(orders::id)))
+        .left_join(shipments.on(shipments::order_id.eq(orders::id)))
+        .left_join(invoices.on(invoices::order_id.eq(orders::id)))
         .filter(orders::uuid.eq(ord_id.to_string()))
         .select((
             orders::uuid,
@@ -190,6 +237,8 @@ pub async fn get_order(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::discount,
+            orders::amount,
             orders::status,
             (
                 users::uuid,
@@ -203,6 +252,8 @@ pub async fn get_order(
                 order_items::uuid,
                 order_items::quantity,
                 order_items::price,
+                order_items::discount,
+                order_items::amount,
                 (
                     products::uuid,
                     products::name,
@@ -219,8 +270,9 @@ pub async fn get_order(
                 payments::transaction_id,
                 payments::amount,
                 payments::status,
-            ),
-            (shipments::uuid, shipments::status, shipments::ship_date),
+            )
+                .nullable(),
+            (shipments::uuid, shipments::status, shipments::ship_date).nullable(),
             invoices::uuid.nullable(),
         ))
         .load::<OrderTuple>(conn);
@@ -240,12 +292,16 @@ pub async fn get_order(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_total_discount,
+                order_total_amount,
                 order_status,
                 (user_uuid, user_first_name, user_last_name, user_phone_number, user_email, utype),
                 (
                     order_item_uuid,
                     order_item_quantity,
                     order_item_price,
+                    order_item_discount,
+                    order_item_amount,
                     (
                         product_uuid,
                         product_name,
@@ -256,8 +312,8 @@ pub async fn get_order(
                         (category_uuid, category_name),
                     ),
                 ),
-                (payment_uuid, pay_method, tran_id, amt, pay_status),
-                (shipment_uuid, shipment_status, shipment_date),
+                payment_opt,
+                shipment_opt,
                 invoice_uuid,
             ) in order_rows
             {
@@ -271,8 +327,10 @@ pub async fn get_order(
                         delivery_location: order_delivery_location,
                         delivery_status: order_delivery_status,
                         total_price: order_total_price,
+                        discount: order_total_discount,
+                        amount: order_total_amount,
                         status: order_status,
-                        customer: UserResponse {
+                        user: UserResponse {
                             uuid: user_uuid,
                             first_name: user_first_name,
                             last_name: user_last_name,
@@ -281,18 +339,22 @@ pub async fn get_order(
                             user_type: utype,
                         },
                         order_items: vec![],
-                        payment: PaymentResponse {
-                            uuid: payment_uuid,
-                            payment_method: pay_method,
-                            transaction_id: tran_id,
-                            amount: amt,
-                            status: pay_status,
-                        },
-                        shipment: ShipmentResponse {
-                            uuid: shipment_uuid,
-                            status: shipment_status,
-                            ship_date: shipment_date,
-                        },
+                        payment: payment_opt.map(|(pay_uuid, method, tran_id, amt, pay_status)| {
+                            PaymentResponse {
+                                uuid: pay_uuid,
+                                payment_method: method,
+                                transaction_id: tran_id,
+                                amount: amt,
+                                status: pay_status,
+                            }
+                        }),
+                        shipment: shipment_opt.map(|(ship_uuid, ship_status, ship_dt)| {
+                            ShipmentResponse {
+                                uuid: ship_uuid,
+                                status: ship_status,
+                                ship_date: ship_dt,
+                            }
+                        }),
                         invoice_id: invoice_uuid,
                     });
 
@@ -300,6 +362,8 @@ pub async fn get_order(
                     uuid: order_item_uuid,
                     quantity: order_item_quantity,
                     price: order_item_price,
+                    discount: order_item_discount,
+                    amount: order_item_amount,
                     product: ProductResponse {
                         uuid: product_uuid,
                         name: product_name,
@@ -318,7 +382,9 @@ pub async fn get_order(
             // Since we're filtering by a single order ID, there should be only one entry
             let response = map.into_iter().next().unwrap().1;
 
-            HttpResponse::Ok().status(StatusCode::OK).json(response)
+            HttpResponse::Ok()
+                .status(StatusCode::OK)
+                .json(serde_json::json!({"order": response}))
         }
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -377,9 +443,13 @@ pub async fn get_user_orders(
         String,
         String,
         f64,
+        f64,
+        f64,
         String,
         (
             String,
+            f64,
+            f64,
             f64,
             f64,
             (
@@ -406,11 +476,15 @@ pub async fn get_user_orders(
             orders::delivery_location,
             orders::delivery_status,
             orders::total_price,
+            orders::discount,
+            orders::amount,
             orders::status,
             (
                 order_items::uuid,
                 order_items::quantity,
                 order_items::price,
+                order_items::discount,
+                order_items::amount,
                 (
                     products::uuid,
                     products::name,
@@ -435,11 +509,15 @@ pub async fn get_user_orders(
                 order_delivery_location,
                 order_delivery_status,
                 order_total_price,
+                order_total_discount,
+                order_total_amount,
                 order_status,
                 (
                     order_item_uuid,
                     order_item_quantity,
                     order_item_price,
+                    order_item_discount,
+                    order_item_amount,
                     (
                         product_uuid,
                         product_name,
@@ -456,6 +534,8 @@ pub async fn get_user_orders(
                     uuid: order_item_uuid,
                     quantity: order_item_quantity,
                     price: order_item_price,
+                    discount: order_item_discount,
+                    amount: order_item_amount,
                     product: ProductResponse {
                         uuid: product_uuid,
                         name: product_name,
@@ -481,6 +561,8 @@ pub async fn get_user_orders(
                             delivery_location: order_delivery_location,
                             delivery_status: order_delivery_status,
                             total_price: order_total_price,
+                            discount: order_total_discount,
+                            amount: order_total_amount,
                             status: order_status,
                             order_items: Vec::new(),
                         });
@@ -527,7 +609,7 @@ pub async fn create(
         Err(e) => return e,
     };
 
-    let pay_method = match PaymentMethod::from_str(&order_json.payment_method) {
+    let pay_method = match PaymentMethod::from_str(&order_json.payment.payment_method) {
         Ok(pm) => pm,
         Err(e) => {
             return HttpResponse::BadRequest()
@@ -535,6 +617,12 @@ pub async fn create(
                 .json(serde_json::json!({"message": e.to_string()}))
         }
     };
+
+    if order_json.order_items.is_empty() {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Invalid order creation request. Order must containt order items"}));
+    }
 
     let conn = &mut get_conn(&pool);
 
@@ -575,23 +663,67 @@ pub async fn create(
         }
     };
 
-    let new_order = NewOrder::new(
-        &user,
-        &order_json.created_on,
-        order_json.delivery_charge,
-        DeliveryStatus::Pending,
-        &order_json.delivery_location,
-        order_total,
-        order_quantity,
-        OrderStatus::PaymentPending,
-        order_discount,
-    );
-
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
-        let mut products_in_order = vec![];
+        let new_order = NewOrder::new(
+            &user,
+            &order_json.created_on,
+            order_json.delivery_charge,
+            DeliveryStatus::Pending,
+            &order_json.delivery_location,
+            order_total,
+            order_quantity,
+            OrderStatus::PaymentPending,
+            order_discount,
+        );
+
         let order: OrderModel = diesel::insert_into(orders::table)
             .values(&new_order)
             .get_result(con)?;
+
+        let shipment = NewShipment::new(&order_json.delivery_location, &order);
+        diesel::insert_into(shipments::table)
+            .values(&shipment)
+            .execute(con)?;
+
+        let tran_id = if order_json.payment.payment_method == PaymentMethod::Cash.value() {
+            Uuid::new_v4().to_string().replace('-', "")
+        } else {
+            String::new()
+        };
+        let new_payment = NewPayment::new(
+            &pay_method,
+            &tran_id,
+            &user,
+            &order,
+            order.get_total_price(),
+            order.get_total_price(),
+            PaymentStatus::Pending.value().to_string(),
+        );
+
+        let payment = diesel::insert_into(payments::table)
+            .values(&new_payment)
+            .get_result::<PaymentModel>(con)?;
+
+        diesel::update(&order)
+            .set(orders::status.eq(OrderStatus::Processed.value()))
+            .execute(con)?;
+
+        let nepal_time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let new_inv = NewInvoice::new(
+            &inv_date,
+            order.get_total_price(),
+            0.0,
+            &order,
+            &user,
+            &payment,
+        );
+
+        let inv = diesel::insert_into(invoices::table)
+            .values(&new_inv)
+            .get_result::<Invoice>(con)?;
 
         for order_item in &order_json.order_items {
             let product: ProductModel = match products::table
@@ -624,58 +756,11 @@ pub async fn create(
                 .set(products::stock.eq(products::stock - order_item.quantity))
                 .execute(con)?;
 
-            products_in_order.push(product);
-        }
+            let new_inv_item = NewInvoiceItem::new(&product, &inv, product.get_price(), 0.0, 0.0);
 
-        if pay_method == PaymentMethod::Cash {
-            let shipment = NewShipment::new(&order_json.delivery_location, &order);
-            diesel::insert_into(shipments::table)
-                .values(&shipment)
+            diesel::insert_into(invoice_items::table)
+                .values(&new_inv_item)
                 .execute(con)?;
-
-            let tran_id = Uuid::new_v4().to_string().replace('-', "");
-            let new_payment = NewPayment::new(
-                &pay_method,
-                &tran_id,
-                &user,
-                &order,
-                order.get_total_price(),
-                order.get_total_price(),
-                order_json.payment_status.to_owned(),
-            );
-
-            let payment = diesel::insert_into(payments::table)
-                .values(&new_payment)
-                .get_result::<PaymentModel>(con)?;
-
-            diesel::update(&order)
-                .set(orders::status.eq(OrderStatus::Processed.value()))
-                .execute(con)?;
-
-            let nepal_time = chrono::Utc::now()
-                .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
-            let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
-
-            let new_inv = NewInvoice::new(
-                &inv_date,
-                order.get_total_price(),
-                0.0,
-                &order,
-                &user,
-                &payment,
-            );
-
-            let inv = diesel::insert_into(invoices::table)
-                .values(&new_inv)
-                .get_result::<Invoice>(con)?;
-
-            for prod in products_in_order {
-                let new_inv_item = NewInvoiceItem::new(&prod, &inv, prod.get_price(), 0.0, 0.0);
-
-                diesel::insert_into(invoice_items::table)
-                    .values(&new_inv_item)
-                    .execute(con)?;
-            }
         }
 
         let order_vm = Order {

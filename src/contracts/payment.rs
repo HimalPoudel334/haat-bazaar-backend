@@ -12,7 +12,7 @@ pub struct Payment {
     pub tendered: f64,
     pub change: f64,
     pub discount: f64,
-    pub transaction_id: String,
+    pub transaction_id: Option<String>,
     pub status: String,
 }
 
@@ -63,7 +63,7 @@ pub struct KhaltiPaymentLookupResponse {
     pub pidx: String,
     pub total_amount: f64,
     pub status: String,
-    pub transaction_id: String,
+    pub transaction_id: Option<String>,
     pub fee: f64,
     pub refunded: bool,
 }
@@ -78,4 +78,5 @@ pub struct KhaltiPidxPayload {
 pub struct KhaltiPaymentConfirmPayload {
     pub pidx: String,
     pub order_id: String,
+    pub payment_id: String,
 }
