@@ -22,6 +22,8 @@ pub struct Payment {
     change: f64,
     discount: f64,
     status: String,
+    service_charge: f64,
+    refunded: bool,
 }
 
 impl Payment {
@@ -72,6 +74,14 @@ impl Payment {
     pub fn get_status(&self) -> &str {
         &self.status
     }
+
+    pub fn get_service_charge(&self) -> f64 {
+        self.service_charge
+    }
+
+    pub fn is_refunded(&self) -> bool {
+        self.refunded
+    }
 }
 
 #[derive(Insertable)]
@@ -88,6 +98,8 @@ pub struct NewPayment {
     change: f64,
     discount: f64,
     status: String,
+    service_charge: f64,
+    refunded: bool,
 }
 
 impl NewPayment {
@@ -112,6 +124,8 @@ impl NewPayment {
             change: tendered - amount,
             discount: 0.0,
             status,
+            service_charge: 0.0,
+            refunded: false,
         }
     }
 }

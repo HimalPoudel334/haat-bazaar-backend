@@ -96,6 +96,8 @@ diesel::table! {
         change -> Double,
         discount -> Double,
         status -> Text,
+        service_charge -> Double,
+        refunded -> Bool,
     }
 }
 

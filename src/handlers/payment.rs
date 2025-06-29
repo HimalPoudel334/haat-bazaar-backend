@@ -412,9 +412,15 @@ pub async fn khalti_payment_confirmation(
                             Err(http_response) => return http_response,
                         };
 
+                    if order.payment.is_none() {
+                        return HttpResponse::NotFound()
+                            .status(StatusCode::NOT_FOUND)
+                            .json(serde_json::json!({"message": "Payment not found for order."}));
+                    }
+
                     // update the payment
                     let payment: PaymentModel = match payments
-                        .filter(payments::uuid.eq(&payload.payment_id))
+                        .filter(payments::uuid.eq(&order.payment.unwrap().uuid)) //payment must
                         .select(PaymentModel::as_select())
                         .first(conn)
                         .optional()
@@ -439,6 +445,7 @@ pub async fn khalti_payment_confirmation(
                                 .as_deref()
                                 .unwrap_or_default()),
                             payments::status.eq(&khalti_response.status),
+                            payments::service_charge.eq(&khalti_response.fee),
                         ))
                         .execute(conn)
                     {
