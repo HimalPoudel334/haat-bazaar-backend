@@ -17,8 +17,8 @@ use crate::{
     config::ApplicationConfiguration,
     contracts::{
         khalti_payment::{
-            AmountBreakdown, KhaltiPaymentPayload, KhaltiResponse, KhaltiResponseCamelCase,
-            ProductDetail, UserInfo,
+            AmountBreakdown, KhaltiPaymentCallback, KhaltiPaymentPayload, KhaltiResponse,
+            KhaltiResponseCamelCase, ProductDetail, UserInfo,
         },
         order::{
             CategoryResponse, OrderItemResponse, OrderResponse, PaymentResponse, ProductResponse,
@@ -370,9 +370,9 @@ pub async fn khalti_payment_get_pidx(
     HttpResponse::Ok().status(StatusCode::OK).json(response)
 }
 
-#[post("/khalti/confirmation")]
+#[get("/khalti/confirmation")]
 pub async fn khalti_payment_confirmation(
-    payload: web::Json<KhaltiPaymentConfirmPayload>,
+    params: web::Query<KhaltiPaymentCallback>,
     client: web::Data<Client>,
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
@@ -385,7 +385,7 @@ pub async fn khalti_payment_confirmation(
     let conn = &mut get_conn(&pool);
 
     let data = serde_json::json!({
-        "pidx": payload.pidx
+        "pidx": params.pidx
     });
 
     let khalti_response_result = client
@@ -407,7 +407,7 @@ pub async fn khalti_payment_confirmation(
                     println!("Confirmation response: {:?}", khalti_response);
 
                     let order: OrderResponse =
-                        match get_order_details(&payload.order_id, &pool).await {
+                        match get_order_details(&params.purchase_order_id, &pool).await {
                             Ok(o) => o,
                             Err(http_response) => return http_response,
                         };
@@ -445,7 +445,9 @@ pub async fn khalti_payment_confirmation(
                                 .as_deref()
                                 .unwrap_or_default()),
                             payments::status.eq(&khalti_response.status),
-                            payments::service_charge.eq(&khalti_response.fee),
+                            payments::service_charge.eq(&khalti_response.fee / 100.0), //all
+                                                                                       //amounts in
+                                                                                       //paisa
                         ))
                         .execute(conn)
                     {

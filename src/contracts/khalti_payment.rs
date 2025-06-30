@@ -91,6 +91,21 @@ impl KhaltiPaymentPayload {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct KhaltiPaymentCallback {
+    pub pidx: String,
+    #[serde(rename = "txnId")]
+    pub txn_id: Option<String>,
+    pub tidx: Option<String>,
+    pub amount: f64,
+    pub total_amount: f64,
+    pub status: String,
+    pub mobile: Option<String>,
+    pub purchase_order_id: String,
+    pub purchase_order_name: Option<String>,
+    pub transaction_id: Option<String>,
+}
+
 #[derive(Deserialize, Serialize, Debug)]
 pub struct KhaltiResponse {
     pub pidx: String,

@@ -141,7 +141,6 @@ pub async fn get_orders_count(
             .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     });
-    println!("{final_date}");
 
     let count = orders
         .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
