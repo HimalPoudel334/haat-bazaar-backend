@@ -103,6 +103,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
                         .service(user::delete),
                 )
                 .service(web::scope("/shipments").service(shipment::get))
+                .service(web::scope("/payments").service(payment::get_all))
                 .service(
                     web::scope("/orders")
                         .service(order::get_orders_count)

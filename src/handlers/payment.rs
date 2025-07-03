@@ -21,12 +21,12 @@ use crate::{
             KhaltiResponseCamelCase, ProductDetail, UserInfo,
         },
         order::{
-            CategoryResponse, OrderItemResponse, OrderResponse, PaymentResponse, ProductResponse,
-            ShipmentResponse, UserResponse,
+            CategoryResponse, DateFilterParams, OrderItemResponse, OrderResponse, PaymentResponse,
+            ProductResponse, ShipmentResponse, UserResponse,
         },
         payment::{
-            EsewaCallbackResponse, KhaltiPaymentConfirmPayload, KhaltiPaymentLookupResponse,
-            KhaltiPidxPayload, NewPayment, Payment,
+            EsewaCallbackResponse, KhaltiPaymentLookupResponse, KhaltiPidxPayload, NewPayment,
+            Payment,
         },
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -42,6 +42,57 @@ use crate::{
     },
     utils,
 };
+
+#[get("")]
+pub async fn get_all(
+    filters: web::Query<DateFilterParams>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::{orders, payments, users};
+
+    let conn = &mut get_conn(&pool);
+
+    let final_date = filters.final_date.clone().unwrap_or_else(|| {
+        let dt = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        dt.format("%Y-%m-%d %H:%M:%S").to_string()
+    });
+
+    let payments_result = payments
+        .inner_join(users.on(payments::user_id.eq(users::id)))
+        .inner_join(orders.on(payments::order_id.eq(orders::id)))
+        .filter(payments::pay_date.between(&filters.init_date, &final_date))
+        .select((
+            payments::uuid,
+            payments::payment_method,
+            users::first_name.concat(" ").concat(users::last_name),
+            orders::uuid,
+            payments::pay_date,
+            payments::amount,
+            payments::tendered,
+            payments::change,
+            payments::discount,
+            payments::transaction_id,
+            payments::status,
+            payments::service_charge,
+            payments::refunded,
+        ))
+        .load::<Payment>(conn);
+
+    match payments_result {
+        Ok(p) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"payments": p})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong when selecting payments"}),
+            ),
+    }
+}
 
 // I think any other method should not exists
 #[post("")]
@@ -145,13 +196,15 @@ pub async fn get(
         tendered: payment.get_tendered(),
         change: payment.get_change(),
         discount: payment.get_discount(),
-        transaction_id: Some(payment.get_transaction_id().to_owned()),
+        transaction_id: payment.get_transaction_id().to_owned(),
         status: payment.get_status().to_owned(),
+        refunded: payment.is_refunded(),
+        service_charge: payment.get_service_charge(),
     };
 
     HttpResponse::Ok()
         .status(StatusCode::OK)
-        .json(payment_response)
+        .json(serde_json::json!({"payment": payment_response}))
 }
 
 #[post("/esewa")]
@@ -466,11 +519,13 @@ pub async fn khalti_payment_confirmation(
                         user_id: order.user.uuid.to_owned(),
                         order_id: order.uuid.to_owned(),
                         amount: payment.get_amount(),
-                        transaction_id: khalti_response.transaction_id,
+                        transaction_id: khalti_response.transaction_id.unwrap_or_default(),
                         tendered: payment.get_tendered(),
                         change: payment.get_change(),
                         discount: payment.get_discount(),
                         status: payment.get_status().to_owned(),
+                        refunded: payment.is_refunded(),
+                        service_charge: payment.get_service_charge(),
                     };
 
                     HttpResponse::Ok()
@@ -682,11 +737,13 @@ pub async fn create_payment(
             user_id: user.get_uuid().to_owned(),
             order_id: order.get_uuid().to_owned(),
             amount: inserted.get_amount(),
-            transaction_id: Some(inserted.get_transaction_id().to_owned()),
+            transaction_id: inserted.get_transaction_id().to_owned(),
             tendered: inserted.get_tendered(),
             change: inserted.get_change(),
             discount: inserted.get_discount(),
             status: inserted.get_status().to_owned(),
+            refunded: inserted.is_refunded(),
+            service_charge: inserted.get_service_charge(),
         };
 
         Ok(HttpResponse::Ok().json(response))

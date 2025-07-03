@@ -10,10 +10,10 @@ use crate::{
         payment_status::PaymentStatus,
     },
     contracts::order::{
-        AllOrderResponse1, CartCheckout, CategoryResponse, Order, OrderCreate, OrderDeliveryStatus,
-        OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
-        OrdersFilterParams, PaymentResponse, ProductResponse, ShipmentResponse, UserOrderResponse,
-        UserResponse,
+        AllOrderResponse1, CartCheckout, CategoryResponse, DateFilterParams, Order, OrderCreate,
+        OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
+        OrderStatus as OrderStatusUpdate, PaymentResponse, ProductResponse, ShipmentResponse,
+        UserOrderResponse, UserResponse,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -34,7 +34,7 @@ pub const DELIVERY_CHARGE: f64 = 100.0;
 
 #[get("")]
 pub async fn get_orders(
-    filters: web::Query<OrdersFilterParams>,
+    filters: web::Query<DateFilterParams>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     //get a pooled connection from db
@@ -123,7 +123,7 @@ pub async fn get_orders(
 
 #[get("/count")]
 pub async fn get_orders_count(
-    filters: web::Query<OrdersFilterParams>,
+    filters: web::Query<DateFilterParams>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use diesel::dsl::count;

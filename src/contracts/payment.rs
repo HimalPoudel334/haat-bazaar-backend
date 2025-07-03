@@ -1,8 +1,11 @@
+use diesel::Queryable;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize)]
+#[derive(Serialize, Queryable)]
+#[diesel(table_name = crate::schema::payments)]
 #[serde(rename_all = "camelCase")]
 pub struct Payment {
+    #[serde(rename = "id")]
     pub uuid: String,
     pub payment_method: String,
     pub user_id: String,
@@ -12,8 +15,10 @@ pub struct Payment {
     pub tendered: f64,
     pub change: f64,
     pub discount: f64,
-    pub transaction_id: Option<String>,
+    pub transaction_id: String,
     pub status: String,
+    pub service_charge: f64,
+    pub refunded: bool,
 }
 
 #[derive(Deserialize)]
