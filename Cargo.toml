@@ -32,4 +32,4 @@ log = "0.4.27"
 strip = true
 opt-level = "s"
 lto = true
-codgen-units = 1
+codegen-units = 1

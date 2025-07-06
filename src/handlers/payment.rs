@@ -3,7 +3,7 @@
 use std::{collections::HashMap, time::Duration};
 
 use ::uuid::Uuid;
-use actix_web::{get, http::StatusCode, post, web, HttpResponse, Responder};
+use actix_web::{get, http::StatusCode, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 use reqwest::{
     header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE},
@@ -13,6 +13,7 @@ use reqwest::{
 use crate::{
     base_types::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
+        payment_status::PaymentStatus,
     },
     config::ApplicationConfiguration,
     contracts::{
@@ -101,6 +102,66 @@ pub async fn create(
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     create_payment(payment_json, &pool).await
+}
+
+#[get("/{payment_id}")]
+pub async fn get_by_id(
+    payment_id: web::Path<String>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let payment_id: String = payment_id.into_inner();
+
+    let payment_id: Uuid = match Uuid::parse_str(&payment_id) {
+        Ok(p) => p,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid payment id"}))
+        }
+    };
+
+    let conn = &mut get_conn(&pool);
+
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::{orders, payments, users};
+
+    let payments_result = payments
+        .inner_join(users.on(payments::user_id.eq(users::id)))
+        .inner_join(orders.on(payments::order_id.eq(orders::id)))
+        .filter(payments::uuid.eq(payment_id.to_string()))
+        .select((
+            payments::uuid,
+            payments::payment_method,
+            users::first_name.concat(" ").concat(users::last_name),
+            orders::uuid,
+            payments::pay_date,
+            payments::amount,
+            payments::tendered,
+            payments::change,
+            payments::discount,
+            payments::transaction_id,
+            payments::status,
+            payments::service_charge,
+            payments::refunded,
+        ))
+        .first::<Payment>(conn)
+        .optional();
+
+    match payments_result {
+        Ok(Some(p)) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"payment": p})),
+        Ok(None) => HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Payment not found for the given id"})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong when selecting payments"}),
+            ),
+    }
 }
 
 #[get("/{order_id}")]
@@ -207,6 +268,43 @@ pub async fn get(
         .json(serde_json::json!({"payment": payment_response}))
 }
 
+#[put("/{payment_id}/complete")]
+pub async fn complete_payment(
+    payment_id: web::Path<String>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let payment_id: String = payment_id.into_inner();
+
+    let payment_id: Uuid = match Uuid::parse_str(&payment_id) {
+        Ok(p) => p,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid payment id"}))
+        }
+    };
+
+    let conn = &mut get_conn(&pool);
+
+    use crate::schema::payments;
+    use crate::schema::payments::dsl::*;
+
+    match diesel::update(payments.filter(payments::uuid.eq(&payment_id.to_string())))
+        .set(payments::status.eq(PaymentStatus::Completed.value()))
+        .returning(PaymentModel::as_returning())
+        .execute(conn)
+        .optional()
+    {
+        Ok(Some(_)) => HttpResponse::Ok().finish(),
+        Ok(None) => HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Invalid payment id"})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
 #[post("/esewa")]
 pub async fn esewa_payment_confirmation(
     req_body: web::Json<EsewaCallbackResponse>,
@@ -219,7 +317,13 @@ pub async fn esewa_payment_confirmation(
     println!("Transaction ref id is {txn_ref_id}");
 
     //Call the verification API with txn_ref_id
-    let verification_result = verify_transaction(txn_ref_id, client, app_config).await;
+    let verification_result = verify_transaction(
+        req_body.product_id.clone(),
+        req_body.total_amount.clone(),
+        client,
+        app_config,
+    )
+    .await;
 
     let response: HttpResponse = match verification_result {
         Ok(vr) => {
@@ -255,7 +359,8 @@ pub async fn esewa_payment_confirmation(
 }
 
 async fn verify_transaction(
-    txn_ref_id: String,
+    product_id: String,
+    amount: String,
     client: web::Data<Client>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> Result<EsewaCallbackResponse, reqwest::Error> {
@@ -279,8 +384,8 @@ async fn verify_transaction(
     headers.insert("Content-Type", HeaderValue::from_static("application/json"));
 
     let url = format!(
-        "{}?txnRefId={}",
-        app_config.esewa_payment_verification_url, txn_ref_id
+        "{}?productId={}&amount={}",
+        app_config.esewa_payment_verification_url, product_id, amount
     );
 
     // I don't know why array is returned

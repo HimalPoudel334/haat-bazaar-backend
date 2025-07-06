@@ -61,3 +61,9 @@ pub struct ProductCreate {
     #[multipart(rename = "categoryId")]
     pub category_id: Text<String>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryFilterParams {
+    pub category_id: Option<String>,
+}

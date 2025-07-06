@@ -6,6 +6,7 @@ use actix_multipart::form::MultipartForm;
 use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
+use crate::contracts::product::CategoryFilterParams;
 use crate::contracts::product_image::ProductImage;
 use crate::models::product_image::{NewProductImage, ProductImage as ProductImageModel};
 use crate::{
@@ -22,17 +23,24 @@ use crate::{
 };
 
 #[get("")]
-pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+pub async fn get(
+    filters: web::Query<CategoryFilterParams>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
     use crate::schema::categories;
     use crate::schema::categories::dsl::*;
     use crate::schema::products;
     use crate::schema::products::dsl::*;
 
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
-    let product_vec = products
-        .inner_join(categories)
+    let mut query = products.inner_join(categories).into_boxed();
+
+    if let Some(cid) = &filters.category_id {
+        query = query.filter(categories::uuid.eq(cid));
+    }
+
+    let result = query
         .select((
             products::uuid,
             products::name,
@@ -47,13 +55,10 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
         ))
         .load::<Product>(conn);
 
-    match product_vec {
-        Ok(p) => HttpResponse::Ok()
-            .status(StatusCode::OK)
-            .json(serde_json::json!({"products": p})),
+    match result {
+        Ok(p) => HttpResponse::Ok().json(serde_json::json!({ "products": p })),
         Err(e) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({"message": e.to_string()})),
+            .json(serde_json::json!({ "message": e.to_string() })),
     }
 }
 
