@@ -6,6 +6,7 @@ pub struct ApplicationConfiguration {
     pub jwt_secret: String,
     pub jwt_expires_in: String,
     pub jwt_maxage: i32,
+    pub refresh_token_secret: String,
     pub product_thumbnail_path: String,
     pub product_extraimages_path: String,
     pub esewa_merchant_id: String,
@@ -30,6 +31,8 @@ impl ApplicationConfiguration {
         let jwt_secret = std::env::var("JWT_SECRET").expect("JWT_SECRET must be set");
         let jwt_expires_in = std::env::var("JWT_EXPIRED_IN").expect("JWT_EXPIRED_IN must be set");
         let jwt_maxage = std::env::var("JWT_MAXAGE").expect("JWT_MAXAGE must be set");
+        let refresh_token_secret =
+            std::env::var("REFRESH_TOKEN_SECRET").expect("REFRESH_TOKEN_SECRET must be set");
         let product_thumbnail_path =
             std::env::var("PRODUCT_THUMBNAIL_URL").expect("PRODUCT_THUMBNAIL_URL must be set");
         let product_extraimages_path =
@@ -68,6 +71,7 @@ impl ApplicationConfiguration {
             jwt_secret,
             jwt_expires_in,
             jwt_maxage: jwt_maxage.parse::<i32>().unwrap(),
+            refresh_token_secret,
             product_thumbnail_path,
             product_extraimages_path,
             esewa_merchant_id,

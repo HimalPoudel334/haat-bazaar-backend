@@ -10,6 +10,8 @@ pub struct LoginCredentials {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LoginResponse {
-    pub token: String,
+    pub access_token: String,
+    pub refresh_token: String,
     pub user: User,
 }
+

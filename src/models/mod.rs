@@ -9,3 +9,4 @@ pub mod product;
 pub mod product_image;
 pub mod shipment;
 pub mod user;
+pub mod refresh_token;

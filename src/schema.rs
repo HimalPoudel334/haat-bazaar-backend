@@ -127,6 +127,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    refresh_tokens (id) {
+        id -> Integer,
+        uuid -> Text,
+        token -> Text,
+        user_id -> Integer,
+        expires_on -> Text,
+    }
+}
+
+diesel::table! {
     shipments (id) {
         id -> Integer,
         uuid -> Text,
@@ -171,6 +181,7 @@ diesel::joinable!(payments -> orders (order_id));
 diesel::joinable!(payments -> users (user_id));
 diesel::joinable!(product_images -> products (product_id));
 diesel::joinable!(products -> categories (category_id));
+diesel::joinable!(refresh_tokens -> users (user_id));
 diesel::joinable!(shipments -> orders (order_id));
 diesel::joinable!(shipments -> users (assigned_to));
 
@@ -184,6 +195,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     payments,
     product_images,
     products,
+    refresh_tokens,
     shipments,
     users,
 );

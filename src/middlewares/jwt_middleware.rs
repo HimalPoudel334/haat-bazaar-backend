@@ -75,7 +75,7 @@ where
                 .map(|s| &s[7..]);
 
             if let Some(token_str) = token {
-                match jwt_helper::verify_jwt(token_str, &config.jwt_secret.as_bytes()) {
+                match jwt_helper::verify_jwt(token_str, &config.jwt_secret.as_bytes()).await {
                     Ok(claims) => {
                         let user_info = UserInfo {
                             user_id: claims.sub.clone(),
@@ -96,4 +96,3 @@ where
         .boxed_local()
     }
 }
-

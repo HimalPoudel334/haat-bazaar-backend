@@ -1,0 +1,10 @@
+-- Your SQL goes here
+CREATE TABLE refresh_tokens (
+  id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, 
+  uuid TEXT NOT NULL UNIQUE,
+  token TEXT NOT NULL,
+  user_id INTEGER NOT NULL,
+  expires_on TEXT NOT NULL,
+
+  FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE
+);
