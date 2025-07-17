@@ -3,7 +3,7 @@ use actix_web::{http::StatusCode, post, web, HttpResponse, Responder};
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 
-use crate::contracts::auth::RefreshCredentials;
+use crate::contracts::auth::{RefreshCredentials, RefreshTokenResponse};
 use crate::models::refresh_token::{NewRefreshToken, RefreshToken};
 use crate::utils::jwt_helper::{create_refresh_token, get_expiration, verify_jwt};
 use crate::{
@@ -28,6 +28,7 @@ pub async fn login(
 
     let conn = &mut get_conn(&pool);
 
+    // Step 1: Get user by email or phone
     let login_user = match users
         .filter(
             email
@@ -38,30 +39,27 @@ pub async fn login(
         .first(conn)
         .optional()
     {
-        Ok(user) => match user {
-            Some(u) => u,
-            None => {
-                return HttpResponse::Unauthorized()
-                    .status(StatusCode::UNAUTHORIZED)
-                    .json(serde_json::json!({"message": "Invalid Username or Password"}))
-            }
-        },
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return HttpResponse::Unauthorized()
+                .status(StatusCode::UNAUTHORIZED)
+                .json(serde_json::json!({ "message": "Invalid Username or Password" }));
+        }
         Err(e) => {
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": format!("Internal server error: {}", e)}))
+                .json(serde_json::json!({ "message": format!("Internal server error: {}", e) }));
         }
     };
 
-    //verify password
-    let is_valid = verify_password_hash(login_user.get_password(), &creds.password);
-    if !is_valid {
+    // Step 2: Verify password
+    if !verify_password_hash(login_user.get_password(), &creds.password) {
         return HttpResponse::Unauthorized()
             .status(StatusCode::UNAUTHORIZED)
-            .json(serde_json::json!({"message": "Invalid Username or Password"}));
+            .json(serde_json::json!({ "message": "Invalid Username or Password" }));
     }
-    println!("User {} logged in successfully", login_user.get_email());
-    //jwt token
+
+    // Step 3: Create access token
     let tok = create_jwt_token(
         login_user.get_uuid().to_owned(),
         login_user.get_user_type().to_owned(),
@@ -70,63 +68,94 @@ pub async fn login(
     )
     .await;
 
-    match tok {
-        Ok(tk) => {
-            let expiration = get_expiration(7 * 24 * 60);
+    let tk = match tok {
+        Ok(t) => t,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({ "message": "Oops! Could not generate access token" }));
+        }
+    };
 
-            let ref_tok = create_refresh_token(
-                login_user.get_uuid().to_string(),
-                &app_config.refresh_token_secret,
-                expiration.0,
-            )
-            .await;
+    // Step 4: Create refresh token
+    let expiration = get_expiration(7 * 24 * 60); // 7 days
+    let ref_tok = create_refresh_token(
+        login_user.get_uuid().to_string(),
+        &app_config.refresh_token_secret,
+        expiration.0,
+    )
+    .await;
 
-            match ref_tok {
-                Ok(rt) => {
-                    let rt_new = NewRefreshToken::new(&login_user, rt.clone(), &expiration.1);
-                    match diesel::insert_into(refresh_tokens).values(&rt_new).execute(conn) {
-                        Ok(_) => {
-                            let login_response = LoginResponse {
-                                access_token: tk,
-                                refresh_token: rt,
-                                user: User {
-                                    uuid: login_user.get_uuid().to_owned(),
-                                    first_name: login_user.get_first_name().to_owned(),
-                                    last_name: login_user.get_last_name().to_owned(),
-                                    phone_number: login_user.get_phone_number().to_owned(),
-                                    email: login_user.get_email().to_owned(),
-                                    user_type: login_user.get_user_type().to_owned(),
-                                    location: login_user.get_location().map(|s| s.to_owned()),
-                                    nearest_landmark: login_user.get_nearest_landmark().map(|s| s.to_owned()),
-                                },
-                            };
-                            HttpResponse::Ok()
-                                .status(StatusCode::OK)
-                                .json(serde_json::json!(login_response))
-                        },
-                        Err(_) => HttpResponse::InternalServerError()
-                                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                    .json(
-                                        serde_json::json!({"message": "Ops! something went wrong. Please try again later"}),
-                                    ),
+    let rt = match ref_tok {
+        Ok(t) => t,
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({ "message": "Oops! Could not generate refresh token" }));
+        }
+    };
 
-                    }
-                }
-                Err(_) => return HttpResponse::InternalServerError()
+    // Step 5: Insert or update refresh token
+    let existing_token = refresh_tokens
+        .filter(user_id.eq(login_user.get_id()))
+        .first::<RefreshToken>(conn)
+        .optional();
+
+    match existing_token {
+        Ok(Some(_)) => {
+            // Update existing token
+            if let Err(_) = diesel::update(refresh_tokens.filter(user_id.eq(login_user.get_id())))
+                .set((token.eq(&rt), expires_on.eq(expiration.1)))
+                .execute(conn)
+            {
+                return HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .json(
-                        serde_json::json!({"message": "Ops! something went wrong. Please try again later"}),
-                    )
+                        serde_json::json!({ "message": "Oops! Failed to update refresh token" }),
+                    );
             }
         }
-        Err(_) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(
-                serde_json::json!({"message": "Ops! something went wrong. Please try again later"}),
-            ),
+        Ok(None) => {
+            // Insert new token
+            let rt_new = NewRefreshToken::new(&login_user, rt.clone(), &expiration.1);
+            if let Err(_) = diesel::insert_into(refresh_tokens)
+                .values(&rt_new)
+                .execute(conn)
+            {
+                return HttpResponse::InternalServerError()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .json(
+                        serde_json::json!({ "message": "Oops! Failed to insert refresh token" }),
+                    );
+            }
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({ "message": "Oops! Could not check refresh token" }));
+        }
     }
-}
 
+    // Step 6: Build and return response
+    let login_response = LoginResponse {
+        access_token: tk,
+        refresh_token: rt,
+        user: User {
+            uuid: login_user.get_uuid().to_owned(),
+            first_name: login_user.get_first_name().to_owned(),
+            last_name: login_user.get_last_name().to_owned(),
+            phone_number: login_user.get_phone_number().to_owned(),
+            email: login_user.get_email().to_owned(),
+            user_type: login_user.get_user_type().to_owned(),
+            location: login_user.get_location().map(|s| s.to_owned()),
+            nearest_landmark: login_user.get_nearest_landmark().map(|s| s.to_owned()),
+        },
+    };
+
+    HttpResponse::Ok()
+        .status(StatusCode::OK)
+        .json(serde_json::json!(login_response))
+}
 #[post("/refresh")]
 pub async fn refresh_token(
     tokens: web::Data<RefreshCredentials>,
@@ -261,10 +290,10 @@ pub async fn refresh_token(
             {
                 Ok(_) => HttpResponse::Ok()
                     .status(StatusCode::OK)
-                    .json(serde_json::json!({
-                        "accessToken": access_token.unwrap(),
-                        "refreshToken": refresh_tok
-                    })),
+                    .json(RefreshTokenResponse {
+                        access_token: access_token.unwrap(),
+                        refresh_token: refresh_tok,
+                    }),
                 Err(e) => HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .json(
