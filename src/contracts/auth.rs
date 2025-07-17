@@ -15,3 +15,15 @@ pub struct LoginResponse {
     pub user: User,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshCredentials {
+    pub access_token: String,
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshTokenResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+}

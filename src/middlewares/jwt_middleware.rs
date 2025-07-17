@@ -84,11 +84,11 @@ where
                         req.extensions_mut().insert(user_info);
                     }
                     Err(e) => {
-                        warn!("JWT verification failed: {}", e);
+                        println!("JWT verification failed: {}", e);
                     }
                 }
             } else {
-                debug!("No valid Bearer token found in Authorization header.");
+                println!("No valid Bearer token found in Authorization header.");
             }
 
             service.call(req).await

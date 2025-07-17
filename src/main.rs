@@ -11,11 +11,11 @@ mod config;
 mod contracts;
 mod db;
 mod handlers;
+mod middlewares;
 mod models;
 mod routes;
 mod schema;
 mod utils;
-mod middlewares;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
