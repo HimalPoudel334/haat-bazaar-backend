@@ -5,7 +5,7 @@ use diesel::prelude::*;
 
 use crate::contracts::auth::{RefreshCredentials, RefreshTokenResponse};
 use crate::models::refresh_token::{NewRefreshToken, RefreshToken};
-use crate::utils::jwt_helper::{create_refresh_token, get_expiration, verify_jwt};
+use crate::utils::jwt_helper::{create_refresh_token, get_expiration, verify_jwt_with_validation};
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
@@ -23,6 +23,7 @@ pub async fn login(
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
+    println!("Login hit");
     use crate::schema::refresh_tokens::dsl::*;
     use crate::schema::users::dsl::*;
 
@@ -78,7 +79,7 @@ pub async fn login(
     };
 
     // Step 4: Create refresh token
-    let expiration = get_expiration(7 * 24 * 60); // 7 days
+    let expiration = get_expiration((app_config.refresh_token_maxage * 24 * 60) as i64); // 7 days
     let ref_tok = create_refresh_token(
         login_user.get_uuid().to_string(),
         &app_config.refresh_token_secret,
@@ -156,9 +157,10 @@ pub async fn login(
         .status(StatusCode::OK)
         .json(serde_json::json!(login_response))
 }
+
 #[post("/refresh")]
 pub async fn refresh_token(
-    tokens: web::Data<RefreshCredentials>,
+    tokens: web::Json<RefreshCredentials>,
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
@@ -168,9 +170,10 @@ pub async fn refresh_token(
 
     let conn = &mut get_conn(&pool);
 
-    let decoded = verify_jwt(
+    let decoded = verify_jwt_with_validation(
         tokens.access_token.as_ref(),
-        app_config.refresh_token_secret.as_bytes(),
+        app_config.jwt_secret.as_bytes(),
+        false,
     )
     .await;
 
@@ -189,7 +192,7 @@ pub async fn refresh_token(
                     None => {
                         return HttpResponse::Unauthorized()
                             .status(StatusCode::UNAUTHORIZED)
-                            .json(serde_json::json!({"message": "Invalid access token provided"}))
+                            .json(serde_json::json!({"message": "Invalid access token provided. User not found"}))
                     }
                 },
                 Err(e) => {
@@ -212,7 +215,7 @@ pub async fn refresh_token(
                     None => {
                         return HttpResponse::Unauthorized()
                             .status(StatusCode::UNAUTHORIZED)
-                            .json(serde_json::json!({"message": "Invalid access token provided"}))
+                            .json(serde_json::json!({"message": "Invalid access token provided. Refresh token not found"}))
                     }
                 },
                 Err(e) => {
@@ -227,7 +230,7 @@ pub async fn refresh_token(
             if ref_tok.get_token() != tokens.refresh_token {
                 return HttpResponse::Unauthorized()
                     .status(StatusCode::UNAUTHORIZED)
-                    .json(serde_json::json!({"message": "Invalid refresh token provided"}));
+                    .json(serde_json::json!({"message": "Invalid refresh token provided. refresh token do not match"}));
             }
 
             let ref_tok_expiry =
@@ -236,7 +239,7 @@ pub async fn refresh_token(
             if let Err(_) = ref_tok_expiry {
                 return HttpResponse::Unauthorized()
                     .status(StatusCode::UNAUTHORIZED)
-                    .json(serde_json::json!({"message": "Invalid refresh token provided"}));
+                    .json(serde_json::json!({"message": "Invalid refresh token provided, refresh token expiration parsing failed"}));
             }
 
             let now = Utc::now().naive_utc();
@@ -244,7 +247,7 @@ pub async fn refresh_token(
             if ref_tok_expiry.unwrap() < now {
                 return HttpResponse::Unauthorized()
                     .status(StatusCode::UNAUTHORIZED)
-                    .json(serde_json::json!({"message": "Invalid refresh token provided"}));
+                    .json(serde_json::json!({"message": "Invalid refresh token provided: refresh token expired"}));
             }
 
             let access_token = create_jwt_token(
@@ -261,7 +264,7 @@ pub async fn refresh_token(
                     .json(serde_json::json!({"message": format!("Internal server error: {}", e)}));
             }
 
-            let expiration = get_expiration(7 * 24 * 60);
+            let expiration = get_expiration((app_config.refresh_token_maxage * 24 * 60) as i64); // 7 days
 
             let refresh_tok = create_refresh_token(
                 user.get_uuid().to_owned(),
@@ -301,10 +304,10 @@ pub async fn refresh_token(
                     ),
             }
         }
-        Err(_) => {
+        Err(e) => {
             return HttpResponse::Unauthorized()
                 .status(StatusCode::UNAUTHORIZED)
-                .json(serde_json::json!({ "message": "Invalid access token" }));
+                .json(serde_json::json!({ "message": format!("Invalid access token: {}", e)}));
         }
     }
 }

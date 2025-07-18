@@ -17,6 +17,7 @@ pub struct LoginResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RefreshCredentials {
     pub access_token: String,
     pub refresh_token: String,

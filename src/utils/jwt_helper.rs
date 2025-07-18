@@ -59,14 +59,22 @@ pub async fn create_refresh_token(
     Ok(token)
 }
 
-pub async fn verify_jwt(token: &str, jwt_secret: &[u8]) -> Result<Claims, Error> {
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(jwt_secret),
-        &Validation::default(),
-    );
+pub async fn verify_jwt_with_validation(
+    token: &str,
+    jwt_secret: &[u8],
+    validate_expiration: bool,
+) -> Result<Claims, Error> {
+    let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
+    validation.validate_exp = validate_expiration;
 
-    Ok(token_data?.claims)
+    let token_data = decode::<Claims>(token, &DecodingKey::from_secret(jwt_secret), &validation)?;
+
+    Ok(token_data.claims)
+}
+
+// Wrapper with default validate_expiration = true
+pub async fn verify_jwt(token: &str, jwt_secret: &[u8]) -> Result<Claims, Error> {
+    verify_jwt_with_validation(token, jwt_secret, true).await
 }
 
 /// Returns both expiration timestamp (UTC) and formatted datetime in +05:45.
