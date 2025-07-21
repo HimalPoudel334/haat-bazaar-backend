@@ -2,8 +2,8 @@ use actix_web::web;
 
 use crate::{
     handlers::{
-        auth, base_type, cart, category, invoice, order, order_item, payment, product, shipment,
-        user,
+        admin_device, auth, base_type, cart, category, invoice, order, order_item, payment,
+        product, shipment, user,
     },
     middlewares::auth_middleware::Auth,
 };
@@ -40,7 +40,8 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(order::edit)
             .service(order::get_order)
             .service(order::get_user_orders)
-            .service(order::update_delivery_status),
+            .service(order::update_delivery_status)
+            .service(order::new_order_created),
     )
     .service(
         web::scope("/order-details")
@@ -108,6 +109,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             )
             .service(web::scope("/shipments").service(shipment::get))
             .service(web::scope("/payments").service(payment::get_all))
+            .service(web::scope("/device").service(admin_device::register_fcm_token))
             .service(
                 web::scope("/orders")
                     .service(order::get_orders_count)

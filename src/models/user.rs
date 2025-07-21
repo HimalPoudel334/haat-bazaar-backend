@@ -69,7 +69,7 @@ impl User {
         &self.last_name
     }
 
-    pub fn get_full_name(&self) -> String {
+    pub fn get_fullname(&self) -> String {
         format!("{} {}", self.first_name, self.last_name)
     }
 

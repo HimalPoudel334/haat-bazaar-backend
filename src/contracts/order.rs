@@ -247,3 +247,11 @@ pub struct DateFilterParams {
     pub init_date: String,
     pub final_date: Option<String>,
 }
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderCreatedPayload {
+    pub order_id: String,
+    pub customer_name: String,
+    pub total_amount: f64,
+}

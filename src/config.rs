@@ -22,6 +22,8 @@ pub struct ApplicationConfiguration {
     pub khalti_payment_confirm_callback_url: String,
     pub khalti_payment_confirm_callback_webiste_url: String,
     pub khalti_payment_confirm_lookup_url: String,
+    pub firebase_service_account_key_path: String,
+    pub firebase_project_id: String,
 }
 
 impl ApplicationConfiguration {
@@ -66,6 +68,10 @@ impl ApplicationConfiguration {
                 .expect("KHALTI_PAYMENT_CONFIRM_CALLBACK_WEBSITE_URL must be set");
         let khalti_payment_confirm_lookup_url = std::env::var("KHALTI_PAYMENT_CONFIRM_LOOKUP_URL")
             .expect("KHALTI_PAYMENT_CONFIRM_LOOKUP_URL must be set");
+        let firebase_service_account_key_path = std::env::var("FIREBASE_SERVICE_ACCOUNT_KEY_PATH")
+            .expect("FIREBASE_SERVICE_ACCOUNT_KEY_PATH must be set in .env file or environment");
+        let firebase_project_id = std::env::var("FIREBASE_PROJECT_ID")
+            .expect("FIREBASE_PROJECT_ID must be set in .env file or environment");
 
         Self {
             server_address,
@@ -90,6 +96,8 @@ impl ApplicationConfiguration {
             khalti_payment_confirm_callback_url,
             khalti_payment_confirm_callback_webiste_url,
             khalti_payment_confirm_lookup_url,
+            firebase_service_account_key_path,
+            firebase_project_id,
         }
     }
 }

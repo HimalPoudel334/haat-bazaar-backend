@@ -1,3 +1,4 @@
+pub mod admin_device;
 pub mod auth;
 pub mod base_type;
 pub mod cart;

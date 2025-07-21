@@ -1,6 +1,17 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    admin_devices (id) {
+        id -> Integer,
+        uuid -> Text,
+        user_id -> Integer,
+        fcm_token -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     carts (id) {
         id -> Integer,
         uuid -> Text,
@@ -167,6 +178,7 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(admin_devices -> users (user_id));
 diesel::joinable!(carts -> products (product_id));
 diesel::joinable!(carts -> users (user_id));
 diesel::joinable!(invoice_items -> invoices (invoice_id));
@@ -186,6 +198,7 @@ diesel::joinable!(shipments -> orders (order_id));
 diesel::joinable!(shipments -> users (assigned_to));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    admin_devices,
     carts,
     categories,
     invoice_items,

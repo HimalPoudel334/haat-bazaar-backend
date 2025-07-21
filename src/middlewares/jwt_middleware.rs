@@ -4,7 +4,7 @@ use actix_web::{
     web, Error as ActixWebError, HttpMessage,
 };
 use futures_util::future::{ok, FutureExt, LocalBoxFuture, Ready};
-use log::{debug, error, warn};
+use log::error;
 use std::rc::Rc;
 
 use crate::utils::jwt_helper;
