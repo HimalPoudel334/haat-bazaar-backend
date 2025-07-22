@@ -7,9 +7,9 @@ use crate::{
     models::{admin_device::NewAdminDevice, user::User},
 };
 
-#[post("/device/register-fcm-token")]
+#[post("/register-fcm-token")]
 pub async fn register_fcm_token(
-    token: web::Data<AdminDevice>,
+    token: web::Json<AdminDevice>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
     use crate::schema::users::dsl::*;
@@ -36,13 +36,13 @@ pub async fn register_fcm_token(
             ),
     };
 
-    let admin_dev = NewAdminDevice {
-        user_id: user.get_id(),
-        fcm_token: token.fcm_token.clone(),
-    };
+    let admin_dev = NewAdminDevice::new(&user, token.fcm_token.clone());
 
     match diesel::insert_into(admin_devices::table)
-        .values(admin_dev)
+        .values(&admin_dev)
+        .on_conflict(admin_devices::user_id)
+        .do_update()
+        .set(admin_devices::fcm_token.eq(&token.fcm_token))
         .execute(conn)
     {
         Ok(_) => HttpResponse::Ok().finish(),

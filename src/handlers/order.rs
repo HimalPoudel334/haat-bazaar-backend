@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
-use fcm_service::{FcmMessage, FcmNotification, Target};
 use reqwest::Client;
 
 use crate::{
@@ -20,7 +19,6 @@ use crate::{
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
-        admin_device::AdminDevice,
         cart::Cart as CartModel,
         invoice::{Invoice, NewInvoice},
         invoice_item::NewInvoiceItem,
@@ -31,10 +29,7 @@ use crate::{
         shipment::NewShipment,
         user::User as UserModel,
     },
-    utils::{
-        fcm_client::FcmClient,
-        uuid_validator::{self},
-    },
+    utils::uuid_validator,
 };
 
 pub const DELIVERY_CHARGE: f64 = 100.0;
@@ -606,7 +601,6 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
     client: web::Data<Client>,
-    app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
     use crate::schema::{
         invoice_items, invoices, order_items, orders, payments, products, shipments, users,
@@ -799,12 +793,8 @@ pub async fn create(
             };
 
             tokio::spawn(async move {
-                let notification_url = format!(
-                    "{}:{}/{}",
-                    app_config.server_address,
-                    app_config.server_port,
-                    "orders/created-notification"
-                ); //"http://127.0.0.1:8080/orders/new";
+                let notification_url = "http://127.0.0.1:8080/notifications/order-created";
+                println!("notification url: {}", notification_url);
                 match client
                     .post(notification_url)
                     .json(&order_created_payload)
@@ -815,15 +805,15 @@ pub async fn create(
                         if resp.status().is_success() {
                             println!("Internal call to /orders/new successful.");
                         } else {
-                            eprintln!(
-                                "Internal call to /orders/new failed: Status {}, Body: {:?}",
+                            println!(
+                                "Internal call to /orders/created-notification failed: Status {}, Body: {:?}",
                                 resp.status(),
                                 resp.text().await.unwrap_or_default()
                             );
                         }
                     }
                     Err(e) => {
-                        eprintln!("Error during internal call to /orders/new: {:?}", e);
+                        println!("Error during internal call to /orders/new: {:?}", e);
                     }
                 }
             });
@@ -1318,78 +1308,4 @@ pub async fn update_delivery_status(
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
-}
-
-#[post("/created-notification")]
-async fn new_order_created(
-    fcm_client: web::Data<FcmClient>,
-    payload: web::Json<OrderCreatedPayload>,
-    pool: web::Data<SqliteConnectionPool>,
-) -> HttpResponse {
-    use crate::schema::admin_devices::dsl::*;
-
-    let conn = &mut get_conn(&pool);
-
-    let admin_dev = match admin_devices
-        .select(AdminDevice::as_select())
-        .load::<AdminDevice>(conn)
-    {
-        Ok(d) => d,
-        Err(_) => return HttpResponse::Ok().status(StatusCode::OK).json(
-            serde_json::json!({"message": "Order created but error while getting admin devices"}),
-        ),
-    };
-
-    if admin_dev.is_empty() {
-        println!("No admin devices registered to send notification to.");
-        return HttpResponse::Ok().body("No admin devices registered, notification not sent.");
-    }
-
-    // --- 2. Construct FCM Message using fcm-service types ---
-    let mut notification = FcmNotification::new();
-    notification.set_title(format!("New Order: {}", payload.order_id));
-    notification.set_body(format!(
-        "Customer: {}, Total: ${:.2}",
-        payload.customer_name, payload.total_amount
-    ));
-    notification.set_image(None);
-
-    let mut data_payload = std::collections::HashMap::new();
-    data_payload.insert("order_id".to_string(), payload.order_id.clone());
-    data_payload.insert("customer_name".to_string(), payload.customer_name.clone());
-    data_payload.insert("total_amount".to_string(), payload.total_amount.to_string());
-    data_payload.insert("event_type".to_string(), "new_order".to_string());
-
-    // --- 3. Send Notification to each Admin Device ---
-    let mut tasks = vec![];
-    for device in admin_dev {
-        let mut fcm_message = FcmMessage::new();
-        fcm_message.set_webpush(None);
-        fcm_message.set_target(Target::Token(device.fcm_token.clone()));
-        fcm_message.set_notification(Some(notification.clone()));
-        fcm_message.set_data(Some(data_payload.clone()));
-
-        let fcm_client_cloned = fcm_client.clone();
-
-        let task = tokio::spawn(async move {
-            let admin_id = device.user_id;
-            match fcm_client_cloned.send_notification(fcm_message).await {
-                Ok(_) => println!(
-                    "Successfully sent FCM notification to admin user: {}",
-                    admin_id
-                ),
-                Err(e) => eprintln!(
-                    "Failed to send FCM notification to admin user {}: {:?}",
-                    admin_id, e
-                ),
-            }
-        });
-        tasks.push(task);
-    }
-
-    for task in tasks {
-        let _ = task.await;
-    }
-
-    HttpResponse::Ok().body("New order received and notifications dispatched!")
 }
