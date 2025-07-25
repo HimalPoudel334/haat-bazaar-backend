@@ -30,6 +30,7 @@ log = "0.4.27"
 fcm-service = "0.2.3"
 anyhow = "1.0.98"
 tokio = "1.46.1"
+async-trait = "0.1.88"
 
 [profile.release]
 strip = true

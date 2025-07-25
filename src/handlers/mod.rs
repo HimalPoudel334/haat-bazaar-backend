@@ -5,7 +5,6 @@ pub mod cart;
 pub mod category;
 pub mod invoice;
 pub mod invoice_item;
-pub mod notification;
 pub mod order;
 pub mod order_item;
 pub mod payment;

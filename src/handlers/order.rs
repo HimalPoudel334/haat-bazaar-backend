@@ -1,19 +1,17 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
 use diesel::prelude::*;
-use reqwest::Client;
 
 use crate::{
     base_types::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
         payment_status::PaymentStatus,
     },
-    config::ApplicationConfiguration,
     contracts::order::{
         AllOrderResponse1, CartCheckout, CategoryResponse, DateFilterParams, Order, OrderCreate,
-        OrderCreatedPayload, OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
+        OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
         OrderStatus as OrderStatusUpdate, PaymentResponse, ProductResponse, ShipmentResponse,
         UserOrderResponse, UserResponse,
     },
@@ -29,6 +27,7 @@ use crate::{
         shipment::NewShipment,
         user::User as UserModel,
     },
+    services::notification_service::{NewOrderPayload, NotificationEvent, NotificationService},
     utils::uuid_validator,
 };
 
@@ -39,46 +38,14 @@ pub async fn get_orders(
     filters: web::Query<DateFilterParams>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
-    //
-    // use crate::schema::order_items::dsl::*;
-    // use crate::schema::orders::dsl::*;
-    // use crate::schema::products::dsl::*;
-    // use crate::schema::{order_items, orders, products};
-    //
+
     let final_date = filters.final_date.clone().unwrap_or_else(|| {
         let dt = chrono::Utc::now()
             .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
         dt.format("%Y-%m-%d %H:%M:%S").to_string()
     });
 
-    // let orders_vec = orders
-    //     .inner_join(order_items.on(order_items::order_id.eq(orders::id)))
-    //     .inner_join(products.on(order_items::product_id.eq(products::id)))
-    //     .filter(orders::created_on.between(&filters.init_date, &final_date))
-    //     .order_by(orders::created_on)
-    //     .select((
-    //         orders::uuid,
-    //         orders::created_on,
-    //         orders::fulfilled_on,
-    //         orders::delivery_charge,
-    //         orders::delivery_location,
-    //         orders::delivery_status,
-    //         orders::total_price,
-    //         orders::discount,
-    //         orders::amount,
-    //         orders::status,
-    //         orders::quantity,
-    //         products::unit,
-    //         products::image,
-    //         products::name,
-    //     ))
-    //     .load::<AllOrderResponse>(conn)
-    //     .expect("Error loading orders");
-
-    //Wrote raw sql so that we could get only one product per order even if the order has multiple
-    //products
     let results = diesel::sql_query(
         r#"
         SELECT
@@ -600,7 +567,7 @@ pub async fn get_user_orders(
 pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
-    client: web::Data<Client>,
+    notification_service: web::Data<Arc<dyn NotificationService>>,
 ) -> impl Responder {
     use crate::schema::{
         invoice_items, invoices, order_items, orders, payments, products, shipments, users,
@@ -786,35 +753,31 @@ pub async fn create(
             .json(serde_json::json!({"order": order_vm})))
     }) {
         Ok(response) => {
-            let order_created_payload = OrderCreatedPayload {
-                order_id: created_order_id,
+            if PaymentMethod::from_str(&order_json.payment.payment_method).unwrap()
+                != PaymentMethod::Cash
+            {
+                return response;
+            }
+
+            let order_created_payload = NewOrderPayload {
+                order_id: created_order_id.clone(),
                 customer_name: user.get_fullname(),
                 total_amount: order_json.total_price,
             };
 
             tokio::spawn(async move {
-                let notification_url = "http://127.0.0.1:8080/notifications/order-created";
-                println!("notification url: {}", notification_url);
-                match client
-                    .post(notification_url)
-                    .json(&order_created_payload)
-                    .send()
+                match notification_service
+                    .send_notification(NotificationEvent::NewOrder(order_created_payload))
                     .await
                 {
-                    Ok(resp) => {
-                        if resp.status().is_success() {
-                            println!("Internal call to /orders/new successful.");
-                        } else {
-                            println!(
-                                "Internal call to /orders/created-notification failed: Status {}, Body: {:?}",
-                                resp.status(),
-                                resp.text().await.unwrap_or_default()
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        println!("Error during internal call to /orders/new: {:?}", e);
-                    }
+                    Ok(_) => println!(
+                        "Notification for order {} dispatched successfully.",
+                        created_order_id
+                    ),
+                    Err(e) => eprintln!(
+                        "Failed to dispatch notification for order {}: {:?}",
+                        created_order_id, e
+                    ),
                 }
             });
 

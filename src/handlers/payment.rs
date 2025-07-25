@@ -1,6 +1,6 @@
 //this api should be hit by payment providers
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use ::uuid::Uuid;
 use actix_web::{get, http::StatusCode, post, put, web, HttpResponse, Responder};
@@ -40,6 +40,9 @@ use crate::{
         product::Product,
         shipment::NewShipment,
         user::User as UserModel,
+    },
+    services::notification_service::{
+        NotificationEvent, NotificationService, PaymentReceivedPayload,
     },
     utils,
 };
@@ -100,8 +103,9 @@ pub async fn get_all(
 pub async fn create(
     payment_json: web::Json<NewPayment>,
     pool: web::Data<SqliteConnectionPool>,
+    notification_service: web::Data<Arc<dyn NotificationService>>,
 ) -> impl Responder {
-    create_payment(payment_json, &pool).await
+    create_payment(payment_json, &pool, notification_service).await
 }
 
 #[get("/{payment_id}")]
@@ -311,6 +315,7 @@ pub async fn esewa_payment_confirmation(
     client: web::Data<Client>,
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
+    notification_service: web::Data<Arc<dyn NotificationService>>,
 ) -> impl Responder {
     println!("Hit by esewa");
     let txn_ref_id = req_body.transaction_details.reference_id.clone();
@@ -343,7 +348,7 @@ pub async fn esewa_payment_confirmation(
                 status: vr.transaction_details.status.to_owned(),
             };
 
-            create_payment(web::Json(payment), &pool).await
+            create_payment(web::Json(payment), &pool, notification_service).await
         }
         Err(e) => {
             eprintln!("{e:?}");
@@ -681,6 +686,7 @@ pub async fn khalti_payment_confirmation(
 pub async fn create_payment(
     payment_json: web::Json<NewPayment>,
     pool: &web::Data<SqliteConnectionPool>,
+    notification_service: web::Data<Arc<dyn NotificationService>>,
 ) -> HttpResponse {
     use crate::schema::{invoice_items, invoices, shipments};
     use crate::schema::{
@@ -723,6 +729,8 @@ pub async fn create_payment(
             }))
         }
     };
+
+    let tran_id_clone = tran_id.clone().unwrap();
 
     // Start DB transaction
     let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
@@ -781,7 +789,7 @@ pub async fn create_payment(
         // Create payment
         let payment_model = NewPaymentModel::new(
             &pay_method,
-            &tran_id.unwrap(),
+            &tran_id.unwrap().clone(),
             &user,
             &order,
             payment_json.amount,
@@ -856,7 +864,34 @@ pub async fn create_payment(
 
     // Handle transaction result
     match result {
-        Ok(response) => response,
+        Ok(response) => {
+            let payment_received_payload = PaymentReceivedPayload {
+                order_id: payment_json.order_id.clone(),
+                transaction_id: tran_id_clone,
+                amount: payment_json.amount,
+                payment_method: payment_json.payment_method.clone(),
+            };
+
+            tokio::spawn(async move {
+                match notification_service
+                    .send_notification(NotificationEvent::PaymentReceived(payment_received_payload))
+                    .await
+                {
+                    Ok(_) => {
+                        println!(
+                            "Notification for payment of order id {} dispatched successfully.",
+                            payment_json.order_id
+                        )
+                    }
+                    Err(e) => eprintln!(
+                        "Failed to dispatch notification for payment of order {}: {:?}",
+                        payment_json.order_id, e
+                    ),
+                }
+            });
+
+            response
+        }
         Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
             "message": "Oops! Something went wrong"
         })),

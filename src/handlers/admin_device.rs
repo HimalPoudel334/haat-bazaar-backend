@@ -36,6 +36,12 @@ pub async fn register_fcm_token(
             ),
     };
 
+    if !user.is_admin() {
+        return HttpResponse::Forbidden()
+            .status(StatusCode::FORBIDDEN)
+            .json(serde_json::json!({"message": "Request user is not an amdin"}));
+    }
+
     let admin_dev = NewAdminDevice::new(&user, token.fcm_token.clone());
 
     match diesel::insert_into(admin_devices::table)

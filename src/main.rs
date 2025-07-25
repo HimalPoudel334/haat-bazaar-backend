@@ -6,7 +6,13 @@ use dotenvy::dotenv;
 use middlewares::jwt_middleware;
 use reqwest::Client;
 
-use crate::db::connection;
+use crate::{
+    db::connection,
+    services::{
+        fcm_notification_service::FcmNotificationServiceImpl,
+        notification_service::NotificationService,
+    },
+};
 
 mod base_types;
 mod config;
@@ -17,29 +23,29 @@ mod middlewares;
 mod models;
 mod routes;
 mod schema;
+mod services;
 mod utils;
 
 #[actix_web::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    //load the environenment variables
     dotenv().ok();
 
-    //create the app config struct
     let app_config = config::ApplicationConfiguration::init();
 
-    //setting up the sqlite database
     let db_pool: connection::SqliteConnectionPool =
         connection::establish_connection(&app_config.database_url);
 
-    //setting up the request client
     let client: Client = Client::new();
 
-    // --- FCM Client Setup ---
     let service_account_key_path = &app_config.firebase_service_account_key_path;
     let fcm_client = utils::fcm_client::FcmClient::new(service_account_key_path).await?;
     let fcm_client_arc = Arc::new(fcm_client);
 
-    //create a directory for uploading images
+    let notification_service_impl =
+        FcmNotificationServiceImpl::new(fcm_client_arc.clone(), db_pool.clone());
+
+    let notification_service: Arc<dyn NotificationService> = Arc::new(notification_service_impl);
+
     std::fs::create_dir_all(&app_config.product_extraimages_path)?;
     std::fs::create_dir_all(&app_config.product_thumbnail_path)?;
 
@@ -52,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .app_data(Data::new(app_config.clone()))
             .app_data(Data::new(db_pool.clone()))
             .app_data(Data::new(client.clone()))
-            .app_data(Data::new(fcm_client_arc.clone()))
+            .app_data(Data::new(notification_service.clone()))
             .wrap(jwt_middleware::JwtAuthentication)
             .configure(routes::app_routes)
             .service(fs::Files::new("/images", "./images"))

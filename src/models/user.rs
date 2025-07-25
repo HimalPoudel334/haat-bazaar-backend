@@ -89,6 +89,14 @@ impl User {
         self.user_type == Self::USERTYPE_ADMIN
     }
 
+    pub fn is_customer(&self) -> bool {
+        self.user_type == Self::USERTYPE_CUSTOMER
+    }
+
+    pub fn is_delivery_staff(&self) -> bool {
+        self.user_type == Self::USERTYPE_DELIVERY
+    }
+
     pub fn get_user_type(&self) -> &str {
         &self.user_type
     }

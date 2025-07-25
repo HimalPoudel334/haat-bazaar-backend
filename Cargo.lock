@@ -956,6 +956,7 @@ dependencies = [
  "actix-web",
  "anyhow",
  "argon2",
+ "async-trait",
  "chrono",
  "diesel",
  "dotenvy",
