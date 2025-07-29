@@ -58,6 +58,7 @@ impl NotificationService for FcmNotificationServiceImpl {
                 data.insert("event_type".to_string(), "new_order".to_string());
                 (notif, data)
             }
+
             NotificationEvent::PaymentReceived(p) => {
                 let mut notif = FcmNotification::new();
                 notif.set_title("Payment Received!".to_string());
@@ -73,6 +74,7 @@ impl NotificationService for FcmNotificationServiceImpl {
                 data.insert("payment_method".to_string(), p.payment_method);
                 (notif, data)
             }
+
             NotificationEvent::OrderCancelled(p) => {
                 let mut notif = FcmNotification::new();
                 notif.set_title(format!("Order Cancelled: {}", p.order_id));
@@ -90,6 +92,7 @@ impl NotificationService for FcmNotificationServiceImpl {
                 }
                 (notif, data)
             }
+
             NotificationEvent::OrderFulfilled(p) => {
                 let mut notif = FcmNotification::new();
                 notif.set_title(format!("Order Fulfilled: {}", p.order_id));
@@ -109,6 +112,7 @@ impl NotificationService for FcmNotificationServiceImpl {
                 }
                 (notif, data)
             }
+
             NotificationEvent::Generic(p) => {
                 let mut notif = FcmNotification::new();
                 notif.set_title(p.title);

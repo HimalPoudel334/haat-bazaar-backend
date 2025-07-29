@@ -52,7 +52,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let server_address = app_config.server_address.clone();
     let server_port = app_config.server_port.clone();
 
-    println!("Server started on http://localhost:8080");
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(app_config.clone()))
@@ -67,6 +66,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .map_err(|e| Box::new(e) as Box<dyn Error>)?
     .run()
     .await?;
+
+    println!("Server started on http://localhost:8080");
 
     Ok(())
 }

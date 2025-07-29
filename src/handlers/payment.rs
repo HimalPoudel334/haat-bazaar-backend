@@ -841,30 +841,32 @@ pub async fn create_payment(
                 .values(&inv_item)
                 .execute(con)?;
         }
+        //
+        // // Prepare API response
+        // let response = Payment {
+        //     uuid: inserted.get_uuid().to_owned(),
+        //     payment_method: inserted.get_payment_method().to_owned(),
+        //     pay_date: inserted.get_pay_date().to_owned(),
+        //     user_id: user.get_uuid().to_owned(),
+        //     order_id: order.get_uuid().to_owned(),
+        //     amount: inserted.get_amount(),
+        //     transaction_id: inserted.get_transaction_id().to_owned(),
+        //     tendered: inserted.get_tendered(),
+        //     change: inserted.get_change(),
+        //     discount: inserted.get_discount(),
+        //     status: inserted.get_status().to_owned(),
+        //     refunded: inserted.is_refunded(),
+        //     service_charge: inserted.get_service_charge(),
+        // };
 
-        // Prepare API response
-        let response = Payment {
-            uuid: inserted.get_uuid().to_owned(),
-            payment_method: inserted.get_payment_method().to_owned(),
-            pay_date: inserted.get_pay_date().to_owned(),
-            user_id: user.get_uuid().to_owned(),
-            order_id: order.get_uuid().to_owned(),
-            amount: inserted.get_amount(),
-            transaction_id: inserted.get_transaction_id().to_owned(),
-            tendered: inserted.get_tendered(),
-            change: inserted.get_change(),
-            discount: inserted.get_discount(),
-            status: inserted.get_status().to_owned(),
-            refunded: inserted.is_refunded(),
-            service_charge: inserted.get_service_charge(),
-        };
-
-        Ok(HttpResponse::Ok().json(response))
+        Ok(HttpResponse::Ok().finish())
     });
 
     // Handle transaction result
     match result {
         Ok(response) => {
+            println!("Khalti payment lookup successful");
+
             let payment_received_payload = PaymentReceivedPayload {
                 order_id: payment_json.order_id.clone(),
                 transaction_id: tran_id_clone,

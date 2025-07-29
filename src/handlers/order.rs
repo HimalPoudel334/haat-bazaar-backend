@@ -27,8 +27,14 @@ use crate::{
         shipment::NewShipment,
         user::User as UserModel,
     },
-    services::notification_service::{NewOrderPayload, NotificationEvent, NotificationService},
-    utils::uuid_validator,
+    services::{
+        email_service::EmailServiceFactory,
+        notification_service::{NewOrderPayload, NotificationEvent, NotificationService},
+    },
+    utils::{
+        pdf_utils::{InvoiceConfig, InvoiceService},
+        uuid_validator,
+    },
 };
 
 pub const DELIVERY_CHARGE: f64 = 100.0;
@@ -753,12 +759,46 @@ pub async fn create(
             .json(serde_json::json!({"order": order_vm})))
     }) {
         Ok(response) => {
+            // Send order created email to customer
+            let email_service = EmailServiceFactory::create_gmail_service(
+                "himalpou101@gmail.com".to_string(),
+                "vcam drbm uypx nvwu".to_string(),
+                "Haatbazar".to_string(),
+            );
+
+            let created_order_id_clone = created_order_id.clone();
+            let user_email_clone = user.get_email().to_string();
+            let user_fullname_clone = user.get_fullname();
+            let created_order_id_for_invoice = created_order_id.clone();
+
+            // Spawn email confirmation task
+            tokio::spawn(async move {
+                if let Ok(es) = email_service {
+                    match es
+                        .send_order_confirmation_email(
+                            &user_email_clone,
+                            &user_fullname_clone,
+                            &created_order_id_clone,
+                            "Test",
+                        )
+                        .await
+                    {
+                        Ok(()) => println!("Confirmation email sent to customer"),
+                        Err(e) => println!("Error sending email to customer: {:?}", e),
+                    }
+                } else {
+                    println!("Error creating email service");
+                }
+            });
+
+            // Early return for non-cash payments (skip notification and invoice)
             if PaymentMethod::from_str(&order_json.payment.payment_method).unwrap()
                 != PaymentMethod::Cash
             {
                 return response;
             }
 
+            // Send notification for cash orders only
             let order_created_payload = NewOrderPayload {
                 order_id: created_order_id.clone(),
                 customer_name: user.get_fullname(),
@@ -778,6 +818,90 @@ pub async fn create(
                         "Failed to dispatch notification for order {}: {:?}",
                         created_order_id, e
                     ),
+                }
+            });
+
+            // Generate and send invoice
+            let invoice_config = InvoiceConfig {
+                storage_dir: format!("invoices/{}", user.get_uuid()),
+                company_name: "Haatbazar".to_string(),
+                company_address:
+                    "123 Business St\nCity, State 12345\nPhone: (555) 123-4567\nEmail: info@company.com"
+                        .to_string(),
+                tax_rate: 0.13,
+            };
+
+            let invoice_service = InvoiceService::new(invoice_config);
+            let user_email_for_invoice = user.get_email().to_string();
+            let user_fullname_for_invoice = user.get_fullname();
+            let delivery_location = order_json.delivery_location.clone();
+
+            tokio::spawn(async move {
+                // Create email service for invoice sending
+                let email_service_for_invoice = match EmailServiceFactory::create_gmail_service(
+                    "himalpou101@gmail.com".to_string(),
+                    "vcam drbm uypx nvwu".to_string(),
+                    "Haatbazar".to_string(),
+                ) {
+                    Ok(service) => service,
+                    Err(e) => {
+                        println!("Failed to create email service for invoice: {:?}", e);
+                        return;
+                    }
+                };
+
+                // Generate invoice
+                let invoice_result = invoice_service
+                    .generate_and_store_invoice(
+                        created_order_id_for_invoice.clone(),
+                        user_fullname_for_invoice.clone(),
+                        delivery_location,
+                        Vec::new(), // Empty items for now - you may want to populate this
+                    )
+                    .await;
+
+                match invoice_result {
+                    Ok(generated_invoice) => {
+                        // Read invoice PDF bytes
+                        match invoice_service
+                            .read_invoice_bytes(&generated_invoice.file_path)
+                            .await
+                        {
+                            Ok(pdf_bytes) => {
+                                // Send invoice email
+                                match email_service_for_invoice
+                                    .send_invoice_email(
+                                        &user_email_for_invoice,
+                                        &user_fullname_for_invoice,
+                                        &generated_invoice.invoice,
+                                        &pdf_bytes,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        println!(
+                                            "Invoice email sent successfully for order {}",
+                                            created_order_id_for_invoice
+                                        );
+
+                                        // Optional: Clean up the invoice file after sending
+                                        if let Err(e) = invoice_service
+                                            .cleanup_invoice_file(&generated_invoice.file_path)
+                                            .await
+                                        {
+                                            println!(
+                                                "Warning: Failed to cleanup invoice file: {:?}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                    Err(e) => println!("Failed to send invoice email: {:?}", e),
+                                }
+                            }
+                            Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
+                        }
+                    }
+                    Err(e) => println!("Failed to generate invoice: {:?}", e),
                 }
             });
 
