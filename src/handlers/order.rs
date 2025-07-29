@@ -884,16 +884,16 @@ pub async fn create(
                                             created_order_id_for_invoice
                                         );
 
-                                        // Optional: Clean up the invoice file after sending
-                                        if let Err(e) = invoice_service
-                                            .cleanup_invoice_file(&generated_invoice.file_path)
-                                            .await
-                                        {
-                                            println!(
-                                                "Warning: Failed to cleanup invoice file: {:?}",
-                                                e
-                                            );
-                                        }
+                                        // // Optional: Clean up the invoice file after sending
+                                        // if let Err(e) = invoice_service
+                                        //     .cleanup_invoice_file(&generated_invoice.file_path)
+                                        //     .await
+                                        // {
+                                        //     println!(
+                                        //         "Warning: Failed to cleanup invoice file: {:?}",
+                                        //         e
+                                        //     );
+                                        // }
                                     }
                                     Err(e) => println!("Failed to send invoice email: {:?}", e),
                                 }

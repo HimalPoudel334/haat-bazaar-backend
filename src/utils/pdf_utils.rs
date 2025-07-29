@@ -236,8 +236,12 @@ impl InvoiceService {
     fn generate_pdf_blocking(invoice: &Invoice, file_path: &Path) -> Result<()> {
         use genpdf::{elements::*, fonts, Document};
 
-        let font_family = fonts::from_files("/usr/share/fonts/liberation/", "LiberationSans", None)
-            .context("Failed to load font family")?;
+        let font_family = fonts::from_files(
+            "/usr/share/fonts/truetype/liberation/",
+            "LiberationSans",
+            None,
+        )
+        .context("Failed to load font family")?;
 
         let mut doc = Document::new(font_family);
         doc.set_title(&format!("Invoice {}", invoice.invoice_number));

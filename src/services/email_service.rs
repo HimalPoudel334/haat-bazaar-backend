@@ -73,10 +73,11 @@ impl LettreEmailService {
     fn create_mailer(config: &EmailConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
         let creds = Credentials::new(config.username.clone(), config.password.clone());
 
-        let mailer_builder = AsyncSmtpTransport::<Tokio1Executor>::relay(&config.smtp_server)
-            .context("Failed to create SMTP relay")?
-            .credentials(creds)
-            .port(config.smtp_port);
+        let mailer_builder =
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&config.smtp_server)
+                .context("Failed to create STARTTLS SMTP relay")?
+                .credentials(creds)
+                .timeout(Some(std::time::Duration::from_secs(config.timeout_seconds)));
 
         let mailer = if config.use_tls {
             mailer_builder.build()
@@ -283,11 +284,11 @@ impl LettreEmailService {
 Thank you for your order! Please find your invoice attached.
 
 Invoice Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Invoice Number: {}
 Date: {}
 Total Amount: Rs. {:.2}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Items:
 {}
@@ -321,10 +322,10 @@ This is an automated message. Please do not reply to this email.
 Thank you for your order! We have received your order and it is being processed.
 
 Order Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Order ID: {}
 Order Summary: {}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 You will receive an invoice shortly via email.
 
