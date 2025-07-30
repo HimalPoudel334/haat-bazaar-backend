@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use lettre::{
-    message::{header, Attachment, Body, MultiPart, SinglePart},
+    message::{header, Attachment, MultiPart, SinglePart},
     transport::smtp::authentication::Credentials,
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
 };
 use tokio::time::{timeout, Duration};
 
-use crate::utils::pdf_utils::{Invoice, InvoiceItem};
+use super::invoice_service::{Invoice, InvoiceItem};
 
 // Email service trait
 #[async_trait::async_trait]

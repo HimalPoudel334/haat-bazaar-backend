@@ -7,7 +7,8 @@ use genpdf::{
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
-use uuid::Uuid;
+
+use crate::utils::number_to_words::NumberToWords;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InvoiceItem {
@@ -74,27 +75,28 @@ impl InvoiceService {
 
     pub async fn generate_and_store_invoice(
         &self,
+        invoice_number: i32,
         order_id: String,
         customer_name: String,
         customer_address: String,
         items: Vec<InvoiceItem>,
     ) -> Result<GeneratedInvoice> {
         // Build invoice data
-        let invoice = self.build_invoice_data(order_id, customer_name, customer_address, items)?;
+        let invoice =
+            self.build_invoice_data(invoice_number, customer_name, customer_address, items)?;
 
         // Ensure storage directory exists
         self.ensure_storage_dir().await?;
 
         // Generate unique filename
-        let filename = self.generate_filename(&invoice.invoice_number);
-        let file_path = PathBuf::from(&self.config.storage_dir).join(&filename);
+        let file_path = PathBuf::from(&self.config.storage_dir).join(&invoice.invoice_number);
 
         // Generate PDF using spawn_blocking (blocking operation)
         let invoice_clone = invoice.clone();
         let file_path_clone = file_path.clone();
 
         tokio::task::spawn_blocking(move || -> Result<()> {
-            Self::generate_pdf_blocking(&invoice_clone, &file_path_clone)
+            Self::generate_pdf_blocking(&invoice_clone, &order_id, &file_path_clone)
         })
         .await
         .context("PDF generation task failed")?
@@ -176,10 +178,9 @@ impl InvoiceService {
     }
 
     // Private helper methods
-
     fn build_invoice_data(
         &self,
-        order_id: String,
+        invoice_number: i32,
         customer_name: String,
         customer_address: String,
         items: Vec<InvoiceItem>,
@@ -188,14 +189,8 @@ impl InvoiceService {
         let tax_amount = subtotal * self.config.tax_rate;
         let total = subtotal + tax_amount;
 
-        let invoice_number = format!(
-            "INV-{}-{}",
-            chrono::Utc::now().format("%Y%m%d"),
-            &order_id.chars().take(8).collect::<String>().to_uppercase()
-        );
-
         Ok(Invoice {
-            invoice_number,
+            invoice_number: format!("{:07}", invoice_number),
             date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
             company_name: self.config.company_name.clone(),
             company_address: self.config.company_address.clone(),
@@ -217,13 +212,13 @@ impl InvoiceService {
         Ok(())
     }
 
-    fn generate_filename(&self, invoice_number: &str) -> String {
-        format!(
-            "{}_{}.pdf",
-            invoice_number,
-            Uuid::new_v4().to_string()[..8].to_lowercase()
-        )
-    }
+    // fn generate_filename(&self, invoice_number: &str) -> String {
+    //     format!(
+    //         "{}_{}.pdf",
+    //         invoice_number,
+    //         Uuid::new_v4().to_string()[..8].to_lowercase()
+    //     )
+    // }
 
     async fn get_file_size(&self, file_path: &Path) -> Result<u64> {
         let metadata = fs::metadata(file_path)
@@ -233,7 +228,7 @@ impl InvoiceService {
     }
 
     // Blocking PDF generation (runs in spawn_blocking)
-    fn generate_pdf_blocking(invoice: &Invoice, file_path: &Path) -> Result<()> {
+    fn generate_pdf_blocking(invoice: &Invoice, order_id: &String, file_path: &Path) -> Result<()> {
         use genpdf::{elements::*, fonts, Document};
 
         let font_family = fonts::from_files(
@@ -255,7 +250,7 @@ impl InvoiceService {
         // Build PDF content
         layout.push(Self::create_header(invoice));
         layout.push(Break::new(2));
-        layout.push(Self::create_invoice_details(invoice));
+        layout.push(Self::create_invoice_details(invoice, order_id));
         layout.push(Break::new(2));
         layout.push(Self::create_customer_section(invoice));
         layout.push(Break::new(3));
@@ -264,6 +259,8 @@ impl InvoiceService {
         layout.push(Self::create_totals_section(invoice));
         layout.push(Break::new(1));
         layout.push(Self::create_amount_in_words(invoice));
+        layout.push(Break::new(1));
+        layout.push(Self::create_thank_you_section());
 
         doc.push(layout);
         doc.render_to_file(file_path)
@@ -283,7 +280,7 @@ impl InvoiceService {
         header
     }
 
-    fn create_invoice_details(invoice: &Invoice) -> LinearLayout {
+    fn create_invoice_details(invoice: &Invoice, order_id: &String) -> LinearLayout {
         let mut details = LinearLayout::vertical();
         details.push(Paragraph::new("INVOICE").styled(Style::new().bold().with_font_size(24)));
         details.push(Break::new(1));
@@ -291,7 +288,10 @@ impl InvoiceService {
             Paragraph::new(&format!("Invoice #: {}", invoice.invoice_number))
                 .styled(Style::new().bold()),
         );
+        details
+            .push(Paragraph::new(&format!("Order Id #: {}", order_id)).styled(Style::new().bold()));
         details.push(Paragraph::new(&format!("Date: {}", invoice.date)).styled(Style::new()));
+
         details
     }
 
@@ -365,6 +365,7 @@ impl InvoiceService {
         totals.push(Break::new(0.5));
         totals.push(
             Paragraph::new(&format!("Total: Rs. {:.2}", invoice.total))
+                .aligned(Alignment::Right)
                 .styled(Style::new().bold().with_font_size(14)),
         );
         totals
@@ -372,8 +373,11 @@ impl InvoiceService {
 
     fn create_amount_in_words(invoice: &Invoice) -> LinearLayout {
         let mut amount_section = LinearLayout::vertical();
-        // You'll need to implement NumberToWords or use a crate
-        let amount_in_words = format!("Rupees {} only", invoice.total as u64); // Simplified
+
+        let amount_in_words = format!(
+            "Rupees {} only",
+            NumberToWords::convert_to_words(invoice.total)
+        );
         amount_section.push(
             Paragraph::new("Amount in Words:").styled(Style::new().bold().with_font_size(12)),
         );
@@ -381,6 +385,16 @@ impl InvoiceService {
             Paragraph::new(&amount_in_words).styled(Style::new().italic().with_font_size(11)),
         );
         amount_section
+    }
+
+    fn create_thank_you_section() -> LinearLayout {
+        let mut thank_you = LinearLayout::vertical();
+        thank_you.push(
+            Paragraph::new("THANK YOU for your purchase")
+                .aligned(Alignment::Center)
+                .styled(Style::new().bold().with_font_size(12)),
+        );
+        thank_you
     }
 
     fn header_cell(text: &str) -> PaddedElement<Paragraph> {

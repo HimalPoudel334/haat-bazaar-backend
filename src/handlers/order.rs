@@ -29,12 +29,10 @@ use crate::{
     },
     services::{
         email_service::EmailServiceFactory,
+        invoice_service::{InvoiceConfig, InvoiceItem, InvoiceService},
         notification_service::{NewOrderPayload, NotificationEvent, NotificationService},
     },
-    utils::{
-        pdf_utils::{InvoiceConfig, InvoiceService},
-        uuid_validator,
-    },
+    utils::uuid_validator,
 };
 
 pub const DELIVERY_CHARGE: f64 = 100.0;
@@ -640,6 +638,9 @@ pub async fn create(
         }
     };
 
+    let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
+    let mut created_inv_id: i32 = 0;
+
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
         let new_order = NewOrder::new(
             &user,
@@ -705,6 +706,8 @@ pub async fn create(
             .values(&new_inv)
             .get_result::<Invoice>(con)?;
 
+        created_inv_id = inv.get_id();
+
         for order_item in &order_json.order_items {
             let product: ProductModel = match products::table
                 .filter(products::uuid.eq(&order_item.product_id))
@@ -741,6 +744,14 @@ pub async fn create(
             diesel::insert_into(invoice_items::table)
                 .values(&new_inv_item)
                 .execute(con)?;
+
+            pdf_inv_items.push(InvoiceItem {
+                description: product.get_name().to_string(),
+                quantity: order_item.quantity,
+                sku: product.get_unit().to_owned(),
+                unit_price: product.get_price(),
+                total: order_item.quantity * product.get_price(),
+            });
         }
 
         let order_vm = Order {
@@ -853,16 +864,16 @@ pub async fn create(
                 // Generate invoice
                 let invoice_result = invoice_service
                     .generate_and_store_invoice(
+                        created_inv_id,
                         created_order_id_for_invoice.clone(),
                         user_fullname_for_invoice.clone(),
                         delivery_location,
-                        Vec::new(), // Empty items for now - you may want to populate this
+                        pdf_inv_items,
                     )
                     .await;
 
                 match invoice_result {
                     Ok(generated_invoice) => {
-                        // Read invoice PDF bytes
                         match invoice_service
                             .read_invoice_bytes(&generated_invoice.file_path)
                             .await
