@@ -101,3 +101,94 @@ impl ApplicationConfiguration {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct EmailConfiguration {
+    pub smtp_server: String,
+    pub smtp_port: u16,
+    pub username: String,
+    pub password: String,
+    pub from_email: String,
+    pub from_name: String,
+    pub timeout_seconds: u64,
+    pub use_tls: bool,
+}
+
+impl Default for EmailConfiguration {
+    fn default() -> Self {
+        Self {
+            smtp_server: "smtp.gmail.com".to_string(),
+            smtp_port: 587,
+            username: "himalpou101@gmail.com".to_string(),
+            password: "your-app-password".to_string(),
+            from_email: "himalpou101@gmail.com".to_string(),
+            from_name: "Haatbazar".to_string(),
+            timeout_seconds: 30,
+            use_tls: true,
+        }
+    }
+}
+
+impl EmailConfiguration {
+    pub fn init() -> Self {
+        let smtp_server = std::env::var("SMTP_SERVER").expect("SMTP_SERVER must be set");
+        let smtp_port = std::env::var("SMTP_PORT").expect("SMTP_PORT must be set");
+        let username = std::env::var("USERNAME").expect("USERNAME must be set");
+        let password = std::env::var("PASSWORD").expect("PASSWORD must be set");
+        let from_email = std::env::var("FROM_EMAIL").expect("FROM_EMAIL must be set");
+        let from_name = std::env::var("FROM_NAME").expect("FROM_NAME must be set");
+        let timeout_seconds =
+            std::env::var("TIMEOUT_SECONDS").expect("TIMEOUT_SECONDS must be set");
+        let use_tls = std::env::var("USE_TLS").expect("USE_TLS must be set");
+
+        Self {
+            smtp_server,
+            smtp_port: smtp_port.parse::<u16>().unwrap(),
+            username,
+            password,
+            from_email,
+            from_name,
+            timeout_seconds: timeout_seconds.parse::<u64>().unwrap(),
+            use_tls: use_tls.parse::<bool>().unwrap(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompanyConfiguration {
+    pub company_name: String,
+    pub address: String,
+    pub email: String,
+    pub telephone: String,
+    pub tax_rate: f64,
+}
+
+impl Default for CompanyConfiguration {
+    fn default() -> Self {
+        Self {
+            company_name: "Haatbazaar".to_string(),
+            address: "".to_string(),
+            email: "info@haatbazaar.com.np".to_string(),
+            telephone: "0234-56789".to_string(),
+            tax_rate: 0.13,
+        }
+    }
+}
+
+impl CompanyConfiguration {
+    pub fn init() -> Self {
+        let company_name = std::env::var("COMPANY_NAME").expect("COMPANY_NAME must be set");
+        let address = std::env::var("ADDRESS").expect("ADDRESS must be set");
+        let email = std::env::var("EMAIL").expect("EMAIL must be set");
+        let telephone = std::env::var("TELEPHONE").expect("TELEPHONE must be set");
+        let tax_rate = std::env::var("TAX_RATE").expect("TAX_RATE must be set");
+
+        Self {
+            company_name,
+            address,
+            email,
+            telephone,
+            tax_rate: tax_rate.parse::<f64>().unwrap(),
+        }
+    }
+}

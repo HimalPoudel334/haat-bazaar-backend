@@ -834,10 +834,14 @@ pub async fn create(
 
             // Generate and send invoice
             let invoice_config = InvoiceConfig {
-                storage_dir: format!("invoices/{}", user.get_uuid()),
+                storage_dir: format!(
+                    "invoices/{}/{}",
+                    user.get_uuid(),
+                    created_order_id_for_invoice.clone()
+                ),
                 company_name: "Haatbazar".to_string(),
                 company_address:
-                    "123 Business St\nCity, State 12345\nPhone: (555) 123-4567\nEmail: info@company.com"
+                    "Birtamod\nJhapa, Koshi 12345\nPhone: 023-456789\nEmail: info@haatbazar.com.np"
                         .to_string(),
                 tax_rate: 0.13,
             };

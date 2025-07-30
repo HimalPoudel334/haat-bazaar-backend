@@ -31,6 +31,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
 
     let app_config = config::ApplicationConfiguration::init();
+    let email_config = config::EmailConfiguration::init();
+    let company_config = config::EmailConfiguration::init();
 
     let db_pool: connection::SqliteConnectionPool =
         connection::establish_connection(&app_config.database_url);
@@ -55,6 +57,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(app_config.clone()))
+            .app_data(Data::new(company_config.clone()))
+            .app_data(Data::new(email_config.clone()))
             .app_data(Data::new(db_pool.clone()))
             .app_data(Data::new(client.clone()))
             .app_data(Data::new(notification_service.clone()))

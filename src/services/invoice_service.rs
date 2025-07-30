@@ -53,12 +53,12 @@ pub struct InvoiceConfig {
 impl Default for InvoiceConfig {
     fn default() -> Self {
         Self {
-            storage_dir: "/tmp/invoices".to_string(),
-            company_name: "Your Company Name".to_string(),
+            storage_dir: "/tmp/invoices/".to_string(),
+            company_name: "Haatbazar".to_string(),
             company_address:
-                "123 Business St\nCity, State 12345\nPhone: (555) 123-4567\nEmail: info@company.com"
+                "Birtamod\nJhapa, Koshi 12345\nPhone: 023-456789\nEmail: info@haatbazar.com.np"
                     .to_string(),
-            tax_rate: 0.085,
+            tax_rate: 0.13,
         }
     }
 }
@@ -81,17 +81,14 @@ impl InvoiceService {
         customer_address: String,
         items: Vec<InvoiceItem>,
     ) -> Result<GeneratedInvoice> {
-        // Build invoice data
         let invoice =
             self.build_invoice_data(invoice_number, customer_name, customer_address, items)?;
 
-        // Ensure storage directory exists
         self.ensure_storage_dir().await?;
 
-        // Generate unique filename
-        let file_path = PathBuf::from(&self.config.storage_dir).join(&invoice.invoice_number);
+        let file_path = PathBuf::from(&self.config.storage_dir)
+            .join(format!("{}.pdf", &invoice.invoice_number));
 
-        // Generate PDF using spawn_blocking (blocking operation)
         let invoice_clone = invoice.clone();
         let file_path_clone = file_path.clone();
 
@@ -102,7 +99,6 @@ impl InvoiceService {
         .context("PDF generation task failed")?
         .context("PDF generation failed")?;
 
-        // Get file size for metadata
         let file_size = self.get_file_size(&file_path).await?;
 
         println!(
@@ -118,7 +114,6 @@ impl InvoiceService {
         })
     }
 
-    /// Read invoice PDF as bytes (for email attachment)
     pub async fn read_invoice_bytes(&self, file_path: &Path) -> Result<Vec<u8>> {
         let bytes = fs::read(file_path)
             .await
@@ -132,7 +127,6 @@ impl InvoiceService {
         Ok(bytes)
     }
 
-    /// Delete invoice file (cleanup after email sent)
     pub async fn cleanup_invoice_file(&self, file_path: &Path) -> Result<()> {
         if file_path.exists() {
             fs::remove_file(file_path)
@@ -144,7 +138,6 @@ impl InvoiceService {
         Ok(())
     }
 
-    /// List all stored invoices (for admin purposes)
     pub async fn list_stored_invoices(&self) -> Result<Vec<PathBuf>> {
         let mut invoices = Vec::new();
 
@@ -163,7 +156,6 @@ impl InvoiceService {
         Ok(invoices)
     }
 
-    /// Get invoice file info without reading full content
     pub async fn get_invoice_info(&self, file_path: &Path) -> Result<InvoiceFileInfo> {
         let metadata = fs::metadata(file_path)
             .await
@@ -177,7 +169,6 @@ impl InvoiceService {
         })
     }
 
-    // Private helper methods
     fn build_invoice_data(
         &self,
         invoice_number: i32,
@@ -227,7 +218,6 @@ impl InvoiceService {
         Ok(metadata.len())
     }
 
-    // Blocking PDF generation (runs in spawn_blocking)
     fn generate_pdf_blocking(invoice: &Invoice, order_id: &String, file_path: &Path) -> Result<()> {
         use genpdf::{elements::*, fonts, Document};
 
@@ -247,7 +237,6 @@ impl InvoiceService {
 
         let mut layout = LinearLayout::vertical();
 
-        // Build PDF content
         layout.push(Self::create_header(invoice));
         layout.push(Break::new(2));
         layout.push(Self::create_invoice_details(invoice, order_id));
@@ -426,7 +415,6 @@ impl InvoiceService {
     }
 }
 
-// Helper structs
 #[derive(Debug)]
 pub struct InvoiceFileInfo {
     pub path: PathBuf,
