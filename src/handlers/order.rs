@@ -9,6 +9,7 @@ use crate::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
         payment_status::PaymentStatus,
     },
+    config::{CompanyConfiguration, EmailConfiguration},
     contracts::order::{
         AllOrderResponse1, CartCheckout, CategoryResponse, DateFilterParams, Order, OrderCreate,
         OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
@@ -29,7 +30,6 @@ use crate::{
     },
     services::{
         email_service::EmailServiceFactory,
-        invoice_service::{InvoiceConfig, InvoiceItem, InvoiceService},
         notification_service::{NewOrderPayload, NotificationEvent, NotificationService},
     },
     utils::uuid_validator,
@@ -572,6 +572,8 @@ pub async fn create(
     order_json: web::Json<OrderCreate>,
     pool: web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
+    email_config: web::Data<EmailConfiguration>,
+    company_config: web::Data<CompanyConfiguration>,
 ) -> impl Responder {
     use crate::schema::{
         invoice_items, invoices, order_items, orders, payments, products, shipments, users,
@@ -638,9 +640,6 @@ pub async fn create(
         }
     };
 
-    let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
-    let mut created_inv_id: i32 = 0;
-
     match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
         let new_order = NewOrder::new(
             &user,
@@ -706,8 +705,6 @@ pub async fn create(
             .values(&new_inv)
             .get_result::<Invoice>(con)?;
 
-        created_inv_id = inv.get_id();
-
         for order_item in &order_json.order_items {
             let product: ProductModel = match products::table
                 .filter(products::uuid.eq(&order_item.product_id))
@@ -744,14 +741,6 @@ pub async fn create(
             diesel::insert_into(invoice_items::table)
                 .values(&new_inv_item)
                 .execute(con)?;
-
-            pdf_inv_items.push(InvoiceItem {
-                description: product.get_name().to_string(),
-                quantity: order_item.quantity,
-                sku: product.get_unit().to_owned(),
-                unit_price: product.get_price(),
-                total: order_item.quantity * product.get_price(),
-            });
         }
 
         let order_vm = Order {
@@ -770,19 +759,12 @@ pub async fn create(
             .json(serde_json::json!({"order": order_vm})))
     }) {
         Ok(response) => {
-            // Send order created email to customer
-            let email_service = EmailServiceFactory::create_gmail_service(
-                "himalpou101@gmail.com".to_string(),
-                "vcam drbm uypx nvwu".to_string(),
-                "Haatbazar".to_string(),
-            );
+            let email_service = EmailServiceFactory::create_gmail_service(email_config.get_ref());
 
             let created_order_id_clone = created_order_id.clone();
             let user_email_clone = user.get_email().to_string();
             let user_fullname_clone = user.get_fullname();
-            let created_order_id_for_invoice = created_order_id.clone();
 
-            // Spawn email confirmation task
             tokio::spawn(async move {
                 if let Ok(es) = email_service {
                     match es
@@ -802,14 +784,12 @@ pub async fn create(
                 }
             });
 
-            // Early return for non-cash payments (skip notification and invoice)
             if PaymentMethod::from_str(&order_json.payment.payment_method).unwrap()
                 != PaymentMethod::Cash
             {
                 return response;
             }
 
-            // Send notification for cash orders only
             let order_created_payload = NewOrderPayload {
                 order_id: created_order_id.clone(),
                 customer_name: user.get_fullname(),
@@ -829,94 +809,6 @@ pub async fn create(
                         "Failed to dispatch notification for order {}: {:?}",
                         created_order_id, e
                     ),
-                }
-            });
-
-            // Generate and send invoice
-            let invoice_config = InvoiceConfig {
-                storage_dir: format!(
-                    "invoices/{}/{}",
-                    user.get_uuid(),
-                    created_order_id_for_invoice.clone()
-                ),
-                company_name: "Haatbazar".to_string(),
-                company_address:
-                    "Birtamod\nJhapa, Koshi 12345\nPhone: 023-456789\nEmail: info@haatbazar.com.np"
-                        .to_string(),
-                tax_rate: 0.13,
-            };
-
-            let invoice_service = InvoiceService::new(invoice_config);
-            let user_email_for_invoice = user.get_email().to_string();
-            let user_fullname_for_invoice = user.get_fullname();
-            let delivery_location = order_json.delivery_location.clone();
-
-            tokio::spawn(async move {
-                // Create email service for invoice sending
-                let email_service_for_invoice = match EmailServiceFactory::create_gmail_service(
-                    "himalpou101@gmail.com".to_string(),
-                    "vcam drbm uypx nvwu".to_string(),
-                    "Haatbazar".to_string(),
-                ) {
-                    Ok(service) => service,
-                    Err(e) => {
-                        println!("Failed to create email service for invoice: {:?}", e);
-                        return;
-                    }
-                };
-
-                // Generate invoice
-                let invoice_result = invoice_service
-                    .generate_and_store_invoice(
-                        created_inv_id,
-                        created_order_id_for_invoice.clone(),
-                        user_fullname_for_invoice.clone(),
-                        delivery_location,
-                        pdf_inv_items,
-                    )
-                    .await;
-
-                match invoice_result {
-                    Ok(generated_invoice) => {
-                        match invoice_service
-                            .read_invoice_bytes(&generated_invoice.file_path)
-                            .await
-                        {
-                            Ok(pdf_bytes) => {
-                                // Send invoice email
-                                match email_service_for_invoice
-                                    .send_invoice_email(
-                                        &user_email_for_invoice,
-                                        &user_fullname_for_invoice,
-                                        &generated_invoice.invoice,
-                                        &pdf_bytes,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        println!(
-                                            "Invoice email sent successfully for order {}",
-                                            created_order_id_for_invoice
-                                        );
-
-                                        // // Optional: Clean up the invoice file after sending
-                                        // if let Err(e) = invoice_service
-                                        //     .cleanup_invoice_file(&generated_invoice.file_path)
-                                        //     .await
-                                        // {
-                                        //     println!(
-                                        //         "Warning: Failed to cleanup invoice file: {:?}",
-                                        //         e
-                                        //     );
-                                        // }
-                                    }
-                                    Err(e) => println!("Failed to send invoice email: {:?}", e),
-                                }
-                            }
-                            Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
-                        }
-                    }
-                    Err(e) => println!("Failed to generate invoice: {:?}", e),
                 }
             });
 

@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let app_config = config::ApplicationConfiguration::init();
     let email_config = config::EmailConfiguration::init();
-    let company_config = config::EmailConfiguration::init();
+    let company_config = config::CompanyConfiguration::init();
 
     let db_pool: connection::SqliteConnectionPool =
         connection::establish_connection(&app_config.database_url);

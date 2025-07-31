@@ -15,7 +15,7 @@ use crate::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
         payment_status::PaymentStatus,
     },
-    config::ApplicationConfiguration,
+    config::{ApplicationConfiguration, CompanyConfiguration, EmailConfiguration},
     contracts::{
         khalti_payment::{
             AmountBreakdown, KhaltiPaymentCallback, KhaltiPaymentPayload, KhaltiResponse,
@@ -41,8 +41,10 @@ use crate::{
         shipment::NewShipment,
         user::User as UserModel,
     },
-    services::notification_service::{
-        NotificationEvent, NotificationService, PaymentReceivedPayload,
+    services::{
+        email_service::EmailServiceFactory,
+        invoice_service::{InvoiceItem, InvoiceService},
+        notification_service::{NotificationEvent, NotificationService, PaymentReceivedPayload},
     },
     utils,
 };
@@ -98,14 +100,22 @@ pub async fn get_all(
     }
 }
 
-// I think any other method should not exists
 #[post("")]
 pub async fn create(
     payment_json: web::Json<NewPayment>,
     pool: web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
+    email_config: web::Data<EmailConfiguration>,
+    company_config: web::Data<CompanyConfiguration>,
 ) -> impl Responder {
-    create_payment(payment_json, &pool, notification_service).await
+    create_payment(
+        payment_json,
+        &pool,
+        notification_service,
+        email_config,
+        company_config,
+    )
+    .await
 }
 
 #[get("/{payment_id}")]
@@ -173,7 +183,6 @@ pub async fn get(
     ord_id: web::Path<(String,)>,
     pool: web::Data<SqliteConnectionPool>,
 ) -> impl Responder {
-    //first check if the order_id is valid or not
     let ord_id: String = ord_id.into_inner().0;
 
     let ord_id: Uuid = match Uuid::parse_str(&ord_id) {
@@ -191,7 +200,6 @@ pub async fn get(
     use crate::schema::users::dsl::*;
     use crate::schema::{orders, payments};
 
-    //get a pooled connection from db
     let conn = &mut get_conn(&pool);
 
     let order: OrderModel = match orders
@@ -316,6 +324,8 @@ pub async fn esewa_payment_confirmation(
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
+    email_config: web::Data<EmailConfiguration>,
+    company_config: web::Data<CompanyConfiguration>,
 ) -> impl Responder {
     println!("Hit by esewa");
     let txn_ref_id = req_body.transaction_details.reference_id.clone();
@@ -348,7 +358,14 @@ pub async fn esewa_payment_confirmation(
                 status: vr.transaction_details.status.to_owned(),
             };
 
-            create_payment(web::Json(payment), &pool, notification_service).await
+            create_payment(
+                web::Json(payment),
+                &pool,
+                notification_service,
+                email_config,
+                company_config,
+            )
+            .await
         }
         Err(e) => {
             eprintln!("{e:?}");
@@ -687,6 +704,8 @@ pub async fn create_payment(
     payment_json: web::Json<NewPayment>,
     pool: &web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
+    email_config: web::Data<EmailConfiguration>,
+    company_config: web::Data<CompanyConfiguration>,
 ) -> HttpResponse {
     use crate::schema::{invoice_items, invoices, shipments};
     use crate::schema::{
@@ -716,6 +735,27 @@ pub async fn create_payment(
         }
     };
 
+    // Fetch user
+    let user: UserModel =
+        match users_dsl::users
+            .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
+            .select(UserModel::as_select())
+            .first(conn)
+            .optional()
+        {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "User not found"
+                }))
+            }
+            Err(_) => return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(
+                    serde_json::json!({"message": "ops! something went wrong while fetching user"}),
+                ),
+        };
+
     // Determine payment method and transaction ID
     let (pay_method, tran_id) = match PaymentMethod::from_str(&payment_json.payment_method) {
         Ok(PaymentMethod::Cash) => (
@@ -731,6 +771,11 @@ pub async fn create_payment(
     };
 
     let tran_id_clone = tran_id.clone().unwrap();
+    let mut created_order_id: String = String::from("");
+    let mut created_inv_id: i32 = 0;
+    let mut created_inv_number: i32 = 0;
+    let mut order_delivery_location: String = String::from("");
+    let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
 
     // Start DB transaction
     let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
@@ -749,21 +794,6 @@ pub async fn create_payment(
             }
         };
 
-        // Fetch user
-        let user: UserModel = match users_dsl::users
-            .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
-            .select(UserModel::as_select())
-            .first(con)
-            .optional()?
-        {
-            Some(u) => u,
-            None => {
-                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "User not found"
-                })))
-            }
-        };
-
         // Verify ownership
         if order.get_user_id() != user.get_id() {
             return Ok(HttpResponse::BadRequest().json(serde_json::json!({
@@ -778,6 +808,8 @@ pub async fn create_payment(
             })));
         }
 
+        created_order_id = order.get_uuid().to_string();
+        order_delivery_location = order.get_delivery_location().to_string();
         // Update order status
         diesel::update(&order)
             .set((
@@ -824,6 +856,9 @@ pub async fn create_payment(
             .values(&new_inv)
             .get_result::<Invoice>(con)?;
 
+        created_inv_id = invoice.get_id();
+        created_inv_number = invoice.invoice_number();
+
         //extract order_items and create invoice item for each product
         let order_items = OrderItem::belonging_to(&order)
             .select(OrderItem::as_select())
@@ -840,6 +875,14 @@ pub async fn create_payment(
             diesel::insert_into(invoice_items::table)
                 .values(&inv_item)
                 .execute(con)?;
+
+            pdf_inv_items.push(InvoiceItem {
+                description: product.get_name().to_string(),
+                quantity: item.get_quantity(),
+                sku: product.get_unit().to_owned(),
+                unit_price: product.get_price(),
+                total: item.get_quantity() * product.get_price(),
+            });
         }
         //
         // // Prepare API response
@@ -889,6 +932,66 @@ pub async fn create_payment(
                         "Failed to dispatch notification for payment of order {}: {:?}",
                         payment_json.order_id, e
                     ),
+                }
+            });
+
+            let invoice_service = InvoiceService::new(company_config.get_ref());
+
+            let user_email_for_invoice = user.get_email().to_string();
+            let user_fullname_for_invoice = user.get_fullname();
+            let order_user_id = user.get_uuid().to_string();
+
+            tokio::spawn(async move {
+                let email_service_for_invoice =
+                    match EmailServiceFactory::create_gmail_service(email_config.get_ref()) {
+                        Ok(service) => service,
+                        Err(e) => {
+                            println!("Failed to create email service for invoice: {:?}", e);
+                            return;
+                        }
+                    };
+
+                let invoice_result = invoice_service
+                    .generate_and_store_invoice(
+                        created_inv_id,
+                        created_inv_number,
+                        created_order_id.clone(),
+                        order_user_id,
+                        user_fullname_for_invoice.clone(),
+                        order_delivery_location,
+                        pdf_inv_items,
+                    )
+                    .await;
+
+                match invoice_result {
+                    Ok(generated_invoice) => {
+                        match invoice_service
+                            .read_invoice_bytes(&generated_invoice.file_path)
+                            .await
+                        {
+                            Ok(pdf_bytes) => {
+                                match email_service_for_invoice
+                                    .send_invoice_email(
+                                        &user_email_for_invoice,
+                                        &user_fullname_for_invoice,
+                                        &generated_invoice.invoice,
+                                        &pdf_bytes,
+                                    )
+                                    .await
+                                {
+                                    Ok(()) => {
+                                        println!(
+                                            "Invoice email sent successfully for order {}",
+                                            created_order_id
+                                        );
+                                    }
+                                    Err(e) => println!("Failed to send invoice email: {:?}", e),
+                                }
+                            }
+                            Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
+                        }
+                    }
+                    Err(e) => println!("Failed to generate invoice: {:?}", e),
                 }
             });
 

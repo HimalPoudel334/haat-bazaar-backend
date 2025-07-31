@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use diesel::prelude::Queryable;
 use genpdf::{
     elements::{Break, LinearLayout, PaddedElement, Paragraph, TableLayout},
     style::Style,
@@ -8,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
-use crate::utils::number_to_words::NumberToWords;
+use crate::{config::CompanyConfiguration, utils::number_to_words::NumberToWords};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Queryable)]
 pub struct InvoiceItem {
     pub description: String,
     pub quantity: f64,
@@ -22,6 +23,7 @@ pub struct InvoiceItem {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invoice {
     pub invoice_number: String,
+    pub print_count: i32,
     pub date: String,
     pub company_name: String,
     pub company_address: String,
@@ -42,52 +44,43 @@ pub struct GeneratedInvoice {
     pub file_size: u64,
 }
 
-#[derive(Debug, Clone)]
-pub struct InvoiceConfig {
-    pub storage_dir: String,
-    pub company_name: String,
-    pub company_address: String,
-    pub tax_rate: f64,
-}
-
-impl Default for InvoiceConfig {
-    fn default() -> Self {
-        Self {
-            storage_dir: "/tmp/invoices/".to_string(),
-            company_name: "Haatbazar".to_string(),
-            company_address:
-                "Birtamod\nJhapa, Koshi 12345\nPhone: 023-456789\nEmail: info@haatbazar.com.np"
-                    .to_string(),
-            tax_rate: 0.13,
-        }
-    }
-}
-
 // Main Invoice Service
 pub struct InvoiceService {
-    config: InvoiceConfig,
+    config: CompanyConfiguration,
 }
 
 impl InvoiceService {
-    pub fn new(config: InvoiceConfig) -> Self {
-        Self { config }
+    pub fn new(config: &CompanyConfiguration) -> Self {
+        Self {
+            config: config.clone(),
+        }
     }
 
     pub async fn generate_and_store_invoice(
         &self,
         invoice_number: i32,
+        print_count: i32,
         order_id: String,
+        customer_id: String,
         customer_name: String,
         customer_address: String,
         items: Vec<InvoiceItem>,
     ) -> Result<GeneratedInvoice> {
-        let invoice =
-            self.build_invoice_data(invoice_number, customer_name, customer_address, items)?;
+        let invoice = self.build_invoice_data(
+            invoice_number,
+            print_count,
+            customer_name,
+            customer_address,
+            items,
+        )?;
 
-        self.ensure_storage_dir().await?;
+        let mut file_path = PathBuf::from(&self.config.invoice_storage_base_dir)
+            .join(&customer_id)
+            .join(&order_id);
 
-        let file_path = PathBuf::from(&self.config.storage_dir)
-            .join(format!("{}.pdf", &invoice.invoice_number));
+        Self::ensure_storage_dir(&file_path).await?;
+
+        file_path = file_path.join(format!("{}.pdf", &invoice.invoice_number));
 
         let invoice_clone = invoice.clone();
         let file_path_clone = file_path.clone();
@@ -138,10 +131,10 @@ impl InvoiceService {
         Ok(())
     }
 
-    pub async fn list_stored_invoices(&self) -> Result<Vec<PathBuf>> {
+    pub async fn list_stored_invoices(&self, file_path: &Path) -> Result<Vec<PathBuf>> {
         let mut invoices = Vec::new();
 
-        let mut dir = fs::read_dir(&self.config.storage_dir)
+        let mut dir = fs::read_dir(file_path)
             .await
             .context("Failed to read invoice storage directory")?;
 
@@ -172,6 +165,7 @@ impl InvoiceService {
     fn build_invoice_data(
         &self,
         invoice_number: i32,
+        print_count: i32,
         customer_name: String,
         customer_address: String,
         items: Vec<InvoiceItem>,
@@ -182,6 +176,7 @@ impl InvoiceService {
 
         Ok(Invoice {
             invoice_number: format!("{:07}", invoice_number),
+            print_count,
             date: chrono::Utc::now().format("%Y-%m-%d").to_string(),
             company_name: self.config.company_name.clone(),
             company_address: self.config.company_address.clone(),
@@ -196,8 +191,8 @@ impl InvoiceService {
         })
     }
 
-    async fn ensure_storage_dir(&self) -> Result<()> {
-        fs::create_dir_all(&self.config.storage_dir)
+    async fn ensure_storage_dir(path: &Path) -> Result<()> {
+        fs::create_dir_all(path)
             .await
             .context("Failed to create invoice storage directory")?;
         Ok(())
@@ -252,6 +247,8 @@ impl InvoiceService {
         layout.push(Self::create_thank_you_section());
 
         doc.push(layout);
+
+        doc.set_minimal_conformance(); //meta-data are removed
         doc.render_to_file(file_path)
             .context("Failed to render PDF to file")?;
 
@@ -277,6 +274,15 @@ impl InvoiceService {
             Paragraph::new(&format!("Invoice #: {}", invoice.invoice_number))
                 .styled(Style::new().bold()),
         );
+
+        let invoice_title = match invoice.print_count {
+            1 => format!("Invoice #: {}", invoice.invoice_number),
+            2 => format!("Invoice #: {} - COPY", invoice.invoice_number),
+            n if n > 2 => format!("Invoice #: {} - COPY ({})", invoice.invoice_number, n - 1),
+            _ => format!("Invoice #: {}", invoice.invoice_number),
+        };
+
+        details.push(Paragraph::new(&invoice_title).styled(Style::new().bold()));
         details
             .push(Paragraph::new(&format!("Order Id #: {}", order_id)).styled(Style::new().bold()));
         details.push(Paragraph::new(&format!("Date: {}", invoice.date)).styled(Style::new()));

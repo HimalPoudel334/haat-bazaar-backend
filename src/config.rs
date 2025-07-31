@@ -157,20 +157,22 @@ impl EmailConfiguration {
 #[derive(Debug, Clone)]
 pub struct CompanyConfiguration {
     pub company_name: String,
-    pub address: String,
-    pub email: String,
-    pub telephone: String,
+    pub company_address: String,
+    pub company_email: String,
+    pub company_telephone: String,
     pub tax_rate: f64,
+    pub invoice_storage_base_dir: String,
 }
 
 impl Default for CompanyConfiguration {
     fn default() -> Self {
         Self {
             company_name: "Haatbazaar".to_string(),
-            address: "".to_string(),
-            email: "info@haatbazaar.com.np".to_string(),
-            telephone: "0234-56789".to_string(),
+            company_address: "".to_string(),
+            company_email: "info@haatbazaar.com.np".to_string(),
+            company_telephone: "0234-56789".to_string(),
             tax_rate: 0.13,
+            invoice_storage_base_dir: "invoices/".to_string(),
         }
     }
 }
@@ -178,17 +180,20 @@ impl Default for CompanyConfiguration {
 impl CompanyConfiguration {
     pub fn init() -> Self {
         let company_name = std::env::var("COMPANY_NAME").expect("COMPANY_NAME must be set");
-        let address = std::env::var("ADDRESS").expect("ADDRESS must be set");
-        let email = std::env::var("EMAIL").expect("EMAIL must be set");
-        let telephone = std::env::var("TELEPHONE").expect("TELEPHONE must be set");
+        let address = std::env::var("COMPANY_ADDRESS").expect("COMPANY_ADDRESS must be set");
+        let email = std::env::var("COMPANY_EMAIL").expect("COMPANY_EMAIL must be set");
+        let telephone = std::env::var("COMPANY_TELEPHONE").expect("COMPANY_TELEPHONE must be set");
         let tax_rate = std::env::var("TAX_RATE").expect("TAX_RATE must be set");
+        let invoice_storage_base_dir = std::env::var("INVOICE_STORAGE_BASE_DIR")
+            .expect("INVOICE_STORAGE_BASE_DIR must be set");
 
         Self {
             company_name,
-            address,
-            email,
-            telephone,
+            company_address: address,
+            company_email: email,
+            company_telephone: telephone,
             tax_rate: tax_rate.parse::<f64>().unwrap(),
+            invoice_storage_base_dir,
         }
     }
 }

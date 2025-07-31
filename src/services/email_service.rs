@@ -6,6 +6,8 @@ use lettre::{
 };
 use tokio::time::{timeout, Duration};
 
+use crate::config::EmailConfiguration;
+
 use super::invoice_service::{Invoice, InvoiceItem};
 
 // Email service trait
@@ -29,48 +31,22 @@ pub trait EmailService: Send + Sync {
 
     async fn send_simple_email(&self, to_email: &str, subject: &str, body: &str) -> Result<()>;
 }
-
-// Email configuration
-#[derive(Debug, Clone)]
-pub struct EmailConfig {
-    pub smtp_server: String,
-    pub smtp_port: u16,
-    pub username: String,
-    pub password: String,
-    pub from_email: String,
-    pub from_name: String,
-    pub timeout_seconds: u64,
-    pub use_tls: bool,
-}
-
-impl Default for EmailConfig {
-    fn default() -> Self {
-        Self {
-            smtp_server: "smtp.gmail.com".to_string(),
-            smtp_port: 587,
-            username: "himalpou101@gmail.com".to_string(),
-            password: "your-app-password".to_string(),
-            from_email: "himalpou101@gmail.com".to_string(),
-            from_name: "Haatbazar".to_string(),
-            timeout_seconds: 30,
-            use_tls: true,
-        }
-    }
-}
-
 // Lettre-based Email Service Implementation
 pub struct LettreEmailService {
-    config: EmailConfig,
+    config: EmailConfiguration,
     mailer: AsyncSmtpTransport<Tokio1Executor>,
 }
 
 impl LettreEmailService {
-    pub fn new(config: EmailConfig) -> Result<Self> {
+    pub fn new(config: &EmailConfiguration) -> Result<Self> {
         let mailer = Self::create_mailer(&config)?;
-        Ok(Self { config, mailer })
+        Ok(Self {
+            config: config.to_owned(),
+            mailer,
+        })
     }
 
-    fn create_mailer(config: &EmailConfig) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
+    fn create_mailer(config: &EmailConfiguration) -> Result<AsyncSmtpTransport<Tokio1Executor>> {
         let creds = Credentials::new(config.username.clone(), config.password.clone());
 
         let mailer_builder =
@@ -284,11 +260,11 @@ impl LettreEmailService {
 Thank you for your order! Please find your invoice attached.
 
 Invoice Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━
 Invoice Number: {}
 Date: {}
 Total Amount: Rs. {:.2}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━
 
 Items:
 {}
@@ -322,10 +298,10 @@ This is an automated message. Please do not reply to this email.
 Thank you for your order! We have received your order and it is being processed.
 
 Order Details:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
 Order ID: {}
 Order Summary: {}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
 
 You will receive an invoice shortly via email.
 
@@ -370,48 +346,22 @@ This is an automated message. Please do not reply to this email.
 pub struct EmailServiceFactory;
 
 impl EmailServiceFactory {
-    pub fn create_lettre_service(config: EmailConfig) -> Result<Box<dyn EmailService>> {
+    pub fn create_lettre_service(config: &EmailConfiguration) -> Result<Box<dyn EmailService>> {
         let service = LettreEmailService::new(config)?;
         Ok(Box::new(service))
     }
 
     // Gmail-specific factory method
     pub fn create_gmail_service(
-        email: String,
-        app_password: String,
-        from_name: String,
+        gmail_config: &EmailConfiguration,
     ) -> Result<Box<dyn EmailService>> {
-        let config = EmailConfig {
-            smtp_server: "smtp.gmail.com".to_string(),
-            smtp_port: 587,
-            username: email.clone(),
-            password: app_password,
-            from_email: email,
-            from_name,
-            timeout_seconds: 30,
-            use_tls: true,
-        };
-
-        Self::create_lettre_service(config)
+        Self::create_lettre_service(gmail_config)
     }
 
     // Outlook-specific factory method
     pub fn create_outlook_service(
-        email: String,
-        password: String,
-        from_name: String,
+        outlook_config: &EmailConfiguration,
     ) -> Result<Box<dyn EmailService>> {
-        let config = EmailConfig {
-            smtp_server: "smtp-mail.outlook.com".to_string(),
-            smtp_port: 587,
-            username: email.clone(),
-            password,
-            from_email: email,
-            from_name,
-            timeout_seconds: 30,
-            use_tls: true,
-        };
-
-        Self::create_lettre_service(config)
+        Self::create_lettre_service(outlook_config)
     }
 }

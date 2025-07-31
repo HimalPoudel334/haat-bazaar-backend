@@ -48,3 +48,9 @@ pub struct NewInvoice {
     pub payment_id: String,
     pub invoice_items: Vec<NewInvoiceItem>,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InvoiceQueryParams {
+    pub order_id: String,
+}

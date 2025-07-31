@@ -109,6 +109,7 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(web::scope("/shipments").service(shipment::get))
             .service(web::scope("/payments").service(payment::get_all))
             .service(web::scope("/device").service(admin_device::register_fcm_token))
+            .service(web::scope("/invoices").service(invoice::get_invoice_file))
             .service(
                 web::scope("/orders")
                     .service(order::get_orders_count)
