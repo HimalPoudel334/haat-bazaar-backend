@@ -217,9 +217,9 @@ impl InvoiceService {
         use genpdf::{elements::*, fonts, Document};
 
         let font_family = fonts::from_files(
-            "/usr/share/fonts/truetype/liberation/",
-            "LiberationSans",
-            None,
+            "/usr/share/fonts/Adwaita",
+            "Adwaita",
+            Some(genpdf::fonts::Builtin::Helvetica),
         )
         .context("Failed to load font family")?;
 
@@ -260,7 +260,9 @@ impl InvoiceService {
         header.push(
             Paragraph::new(&invoice.company_name).styled(Style::new().bold().with_font_size(18)),
         );
-        for line in invoice.company_address.lines() {
+
+        let address = invoice.company_address.replace("\\n", "\n");
+        for line in address.lines() {
             header.push(Paragraph::new(line).styled(Style::new().with_font_size(10)));
         }
         header
@@ -270,10 +272,6 @@ impl InvoiceService {
         let mut details = LinearLayout::vertical();
         details.push(Paragraph::new("INVOICE").styled(Style::new().bold().with_font_size(24)));
         details.push(Break::new(1));
-        details.push(
-            Paragraph::new(&format!("Invoice #: {}", invoice.invoice_number))
-                .styled(Style::new().bold()),
-        );
 
         let invoice_title = match invoice.print_count {
             1 => format!("Invoice #: {}", invoice.invoice_number),
@@ -369,10 +367,7 @@ impl InvoiceService {
     fn create_amount_in_words(invoice: &Invoice) -> LinearLayout {
         let mut amount_section = LinearLayout::vertical();
 
-        let amount_in_words = format!(
-            "Rupees {} only",
-            NumberToWords::convert_to_words(invoice.total)
-        );
+        let amount_in_words = format!("Rupees {}", NumberToWords::convert_to_words(invoice.total));
         amount_section.push(
             Paragraph::new("Amount in Words:").styled(Style::new().bold().with_font_size(12)),
         );

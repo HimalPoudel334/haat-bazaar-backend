@@ -105,15 +105,15 @@ pub async fn create(
     payment_json: web::Json<NewPayment>,
     pool: web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
-    email_config: web::Data<EmailConfiguration>,
     company_config: web::Data<CompanyConfiguration>,
+    email_config: web::Data<EmailConfiguration>,
 ) -> impl Responder {
     create_payment(
         payment_json,
         &pool,
         notification_service,
-        email_config,
         company_config,
+        email_config,
     )
     .await
 }
@@ -362,8 +362,8 @@ pub async fn esewa_payment_confirmation(
                 web::Json(payment),
                 &pool,
                 notification_service,
-                email_config,
                 company_config,
+                email_config,
             )
             .await
         }
@@ -556,11 +556,18 @@ pub async fn khalti_payment_confirmation(
     client: web::Data<Client>,
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
+    notification_service: web::Data<Arc<dyn NotificationService>>,
+    email_config: web::Data<EmailConfiguration>,
+    company_config: web::Data<CompanyConfiguration>,
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
-    use crate::schema::payments;
+    use crate::schema::invoice_items::dsl::*;
+    use crate::schema::invoices::dsl::*;
+    use crate::schema::orders::dsl::*;
     use crate::schema::payments::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{invoice_items, orders, payments, products};
 
     let conn = &mut get_conn(&pool);
 
@@ -618,6 +625,50 @@ pub async fn khalti_payment_confirmation(
                         }
                     };
 
+                    let invoice = match invoices
+                        .inner_join(orders)
+                        .inner_join(payments)
+                        .filter(orders::uuid.eq(&order.uuid))
+                        .filter(payments::id.eq(payment.get_id()))
+                        .select(crate::models::invoice::Invoice::as_select())
+                        .first(conn)
+                        .optional()
+                    {
+                        Ok(Some(inv)) => inv,
+                        Ok(None) => {
+                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+                                serde_json::json!({"message": "Invoice not found for order."}),
+                            );
+                        }
+                        Err(_) => {
+                            return HttpResponse::InternalServerError()
+                                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                                .json(serde_json::json!({"message": "ops! something went wrong"}));
+                        }
+                    };
+
+                    let inv_items = match invoice_items
+                        .inner_join(products.on(invoice_items::product_id.eq(products::id)))
+                        .filter(invoice_items::invoice_id.eq(invoice.get_id()))
+                        .select((
+                            products::name,
+                            invoice_items::quantity,
+                            invoice_items::unit_price,
+                            products::unit,
+                            invoice_items::total,
+                        ))
+                        .load::<InvoiceItem>(conn)
+                    {
+                        Ok(items) => items,
+                        Err(_) => {
+                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+                                serde_json::json!({
+                                    "message": "Invoice not found"
+                                }),
+                            )
+                        }
+                    };
+
                     match diesel::update(&payment)
                         .set((
                             payments::transaction_id.eq(khalti_response
@@ -626,12 +677,39 @@ pub async fn khalti_payment_confirmation(
                                 .unwrap_or_default()),
                             payments::status.eq(&khalti_response.status),
                             payments::service_charge.eq(&khalti_response.fee / 100.0), //all
-                                                                                       //amounts in
-                                                                                       //paisa
                         ))
                         .execute(conn)
                     {
-                        Ok(_) => {}
+                        Ok(_) => {
+                            let order_id_clone = order.uuid.clone();
+
+                            tokio::spawn(async move {
+                                send_order_notification(
+                                    notification_service.get_ref(),
+                                    order.uuid.clone(),
+                                    payment.get_transaction_id().to_string(),
+                                    khalti_response.total_amount / 100.0,
+                                    PaymentMethod::Khalti.value().to_string(),
+                                )
+                                .await;
+                            });
+
+                            tokio::spawn(async move {
+                                send_email_with_invoice(
+                                    email_config.get_ref(),
+                                    company_config.get_ref(),
+                                    invoice.get_id(),
+                                    invoice.invoice_number(),
+                                    order_id_clone,
+                                    order.user.uuid,
+                                    format!("{} {}", order.user.first_name, order.user.last_name),
+                                    order.user.email,
+                                    order.delivery_location,
+                                    inv_items,
+                                )
+                                .await;
+                            });
+                        }
                         Err(_) => {
                             return HttpResponse::InternalServerError()
                                 .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -639,25 +717,24 @@ pub async fn khalti_payment_confirmation(
                         }
                     }
 
-                    let response = Payment {
-                        uuid: payment.get_uuid().to_owned(),
-                        payment_method: payment.get_payment_method().to_owned(),
-                        pay_date: payment.get_pay_date().to_owned(),
-                        user_id: order.user.uuid.to_owned(),
-                        order_id: order.uuid.to_owned(),
-                        amount: payment.get_amount(),
-                        transaction_id: khalti_response.transaction_id.unwrap_or_default(),
-                        tendered: payment.get_tendered(),
-                        change: payment.get_change(),
-                        discount: payment.get_discount(),
-                        status: payment.get_status().to_owned(),
-                        refunded: payment.is_refunded(),
-                        service_charge: payment.get_service_charge(),
-                    };
+                    // let response = Payment {
+                    //     uuid: payment.get_uuid().to_owned(),
+                    //     payment_method: payment.get_payment_method().to_owned(),
+                    //     pay_date: payment.get_pay_date().to_owned(),
+                    //     user_id: order.user.uuid.to_owned(),
+                    //     order_id: order.uuid.to_owned(),
+                    //     amount: payment.get_amount(),
+                    //     transaction_id: khalti_response.transaction_id.unwrap_or_default(),
+                    //     tendered: payment.get_tendered(),
+                    //     change: payment.get_change(),
+                    //     discount: payment.get_discount(),
+                    //     status: payment.get_status().to_owned(),
+                    //     refunded: payment.is_refunded(),
+                    //     service_charge: payment.get_service_charge(),
+                    // };
 
-                    HttpResponse::Ok()
-                        .status(StatusCode::OK)
-                        .json(serde_json::json!({"payment": response}))
+                    HttpResponse::Ok().status(StatusCode::OK).finish()
+                    // .json(serde_json::json!({"payment": response}))
                 }
                 Err(er) => {
                     eprintln!("{er}");
@@ -704,8 +781,8 @@ pub async fn create_payment(
     payment_json: web::Json<NewPayment>,
     pool: &web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
-    email_config: web::Data<EmailConfiguration>,
     company_config: web::Data<CompanyConfiguration>,
+    email_config: web::Data<EmailConfiguration>,
 ) -> HttpResponse {
     use crate::schema::{invoice_items, invoices, shipments};
     use crate::schema::{
@@ -910,89 +987,36 @@ pub async fn create_payment(
         Ok(response) => {
             println!("Khalti payment lookup successful");
 
-            let payment_received_payload = PaymentReceivedPayload {
-                order_id: payment_json.order_id.clone(),
-                transaction_id: tran_id_clone,
-                amount: payment_json.amount,
-                payment_method: payment_json.payment_method.clone(),
-            };
-
+            let created_order_id_clone = created_order_id.clone();
             tokio::spawn(async move {
-                match notification_service
-                    .send_notification(NotificationEvent::PaymentReceived(payment_received_payload))
-                    .await
-                {
-                    Ok(_) => {
-                        println!(
-                            "Notification for payment of order id {} dispatched successfully.",
-                            payment_json.order_id
-                        )
-                    }
-                    Err(e) => eprintln!(
-                        "Failed to dispatch notification for payment of order {}: {:?}",
-                        payment_json.order_id, e
-                    ),
-                }
+                send_order_notification(
+                    notification_service.get_ref(),
+                    created_order_id,
+                    tran_id_clone,
+                    payment_json.amount,
+                    payment_json.payment_method.clone(),
+                )
+                .await;
             });
-
-            let invoice_service = InvoiceService::new(company_config.get_ref());
 
             let user_email_for_invoice = user.get_email().to_string();
             let user_fullname_for_invoice = user.get_fullname();
             let order_user_id = user.get_uuid().to_string();
 
             tokio::spawn(async move {
-                let email_service_for_invoice =
-                    match EmailServiceFactory::create_gmail_service(email_config.get_ref()) {
-                        Ok(service) => service,
-                        Err(e) => {
-                            println!("Failed to create email service for invoice: {:?}", e);
-                            return;
-                        }
-                    };
-
-                let invoice_result = invoice_service
-                    .generate_and_store_invoice(
-                        created_inv_id,
-                        created_inv_number,
-                        created_order_id.clone(),
-                        order_user_id,
-                        user_fullname_for_invoice.clone(),
-                        order_delivery_location,
-                        pdf_inv_items,
-                    )
-                    .await;
-
-                match invoice_result {
-                    Ok(generated_invoice) => {
-                        match invoice_service
-                            .read_invoice_bytes(&generated_invoice.file_path)
-                            .await
-                        {
-                            Ok(pdf_bytes) => {
-                                match email_service_for_invoice
-                                    .send_invoice_email(
-                                        &user_email_for_invoice,
-                                        &user_fullname_for_invoice,
-                                        &generated_invoice.invoice,
-                                        &pdf_bytes,
-                                    )
-                                    .await
-                                {
-                                    Ok(()) => {
-                                        println!(
-                                            "Invoice email sent successfully for order {}",
-                                            created_order_id
-                                        );
-                                    }
-                                    Err(e) => println!("Failed to send invoice email: {:?}", e),
-                                }
-                            }
-                            Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
-                        }
-                    }
-                    Err(e) => println!("Failed to generate invoice: {:?}", e),
-                }
+                send_email_with_invoice(
+                    email_config.get_ref(),
+                    company_config.get_ref(),
+                    created_inv_id,
+                    created_inv_number,
+                    created_order_id_clone,
+                    order_user_id,
+                    user_fullname_for_invoice,
+                    user_email_for_invoice,
+                    order_delivery_location,
+                    pdf_inv_items,
+                )
+                .await;
             });
 
             response
@@ -1220,5 +1244,102 @@ async fn get_order_details(
         Err(_) => Err(HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"}))),
+    }
+}
+
+async fn send_order_notification(
+    notification_service: &Arc<dyn NotificationService>,
+    order_id: String,
+    tran_id: String,
+    amount: f64,
+    pay_method: String,
+) {
+    let payment_received_payload = PaymentReceivedPayload {
+        order_id: order_id.clone(),
+        transaction_id: tran_id,
+        amount,
+        payment_method: pay_method,
+    };
+
+    match notification_service
+        .send_notification(NotificationEvent::PaymentReceived(payment_received_payload))
+        .await
+    {
+        Ok(_) => {
+            println!(
+                "Notification for payment of order id {} dispatched successfully.",
+                order_id
+            )
+        }
+        Err(e) => eprintln!(
+            "Failed to dispatch notification for payment of order {}: {:?}",
+            order_id, e
+        ),
+    };
+}
+
+async fn send_email_with_invoice(
+    email_config: &EmailConfiguration,
+    company_config: &CompanyConfiguration,
+    invoice_id: i32,
+    invoice_no: i32,
+    created_order_id: String,
+    inv_user_id: String,
+    user_name: String,
+    user_email: String,
+    order_delivery_location: String,
+    inv_items: Vec<InvoiceItem>,
+) {
+    let email_service_for_invoice = match EmailServiceFactory::create_gmail_service(email_config) {
+        Ok(service) => service,
+        Err(e) => {
+            println!("Failed to create email service for invoice: {:?}", e);
+            return;
+        }
+    };
+
+    let invoice_service = InvoiceService::new(company_config);
+
+    let invoice_result = invoice_service
+        .generate_and_store_invoice(
+            invoice_id,
+            invoice_no,
+            created_order_id.clone(),
+            inv_user_id,
+            user_name.clone(),
+            order_delivery_location,
+            inv_items,
+        )
+        .await;
+
+    match invoice_result {
+        Ok(generated_invoice) => {
+            match invoice_service
+                .read_invoice_bytes(&generated_invoice.file_path)
+                .await
+            {
+                Ok(pdf_bytes) => {
+                    match email_service_for_invoice
+                        .send_invoice_email(
+                            &user_email,
+                            &user_name,
+                            &generated_invoice.invoice,
+                            &pdf_bytes,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            println!(
+                                "Invoice email sent successfully for order {}",
+                                created_order_id
+                            );
+                        }
+                        Err(e) => println!("Failed to send invoice email: {:?}", e),
+                    }
+                }
+                Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
+            }
+        }
+        Err(e) => println!("Failed to generate invoice: {:?}", e),
     }
 }

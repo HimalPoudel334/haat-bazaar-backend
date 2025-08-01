@@ -9,7 +9,7 @@ use crate::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
         payment_status::PaymentStatus,
     },
-    config::{CompanyConfiguration, EmailConfiguration},
+    config::EmailConfiguration,
     contracts::order::{
         AllOrderResponse1, CartCheckout, CategoryResponse, DateFilterParams, Order, OrderCreate,
         OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
@@ -573,7 +573,6 @@ pub async fn create(
     pool: web::Data<SqliteConnectionPool>,
     notification_service: web::Data<Arc<dyn NotificationService>>,
     email_config: web::Data<EmailConfiguration>,
-    company_config: web::Data<CompanyConfiguration>,
 ) -> impl Responder {
     use crate::schema::{
         invoice_items, invoices, order_items, orders, payments, products, shipments, users,
@@ -736,7 +735,7 @@ pub async fn create(
                 .set(products::stock.eq(products::stock - order_item.quantity))
                 .execute(con)?;
 
-            let new_inv_item = NewInvoiceItem::new(&product, &inv, product.get_price(), 0.0, 0.0);
+            let new_inv_item = NewInvoiceItem::new(&product, &inv, order_item.quantity, 0.0, 0.0);
 
             diesel::insert_into(invoice_items::table)
                 .values(&new_inv_item)

@@ -48,7 +48,7 @@ impl NumberToWords {
                 result.push_str(" and ");
             }
             result.push_str(&Self::convert_paisa(paisa));
-            result.push_str(" paisa");
+            result.push_str(" Paisa");
         }
 
         result.push_str(" Only");
