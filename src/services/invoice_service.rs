@@ -132,7 +132,7 @@ impl InvoiceService {
         let font_family = fonts::from_files(
             "/usr/share/fonts/truetype/liberation",
             "LiberationSans",
-            Some(genpdf::fonts::Builtin::Helvetica),
+            Some(genpdf::fonts::Builtin::Times),
         )
         .context("Failed to load font family")?;
 
@@ -332,4 +332,3 @@ impl InvoiceService {
             .padded(1)
     }
 }
-
