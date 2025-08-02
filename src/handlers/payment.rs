@@ -1,5 +1,3 @@
-//this api should be hit by payment providers
-
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use ::uuid::Uuid;
@@ -1000,7 +998,6 @@ pub async fn create_payment(
 
             let user_email_for_invoice = user.get_email().to_string();
             let user_fullname_for_invoice = user.get_fullname();
-            let order_user_id = user.get_uuid().to_string();
 
             tokio::spawn(async move {
                 send_email_with_invoice(
