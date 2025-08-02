@@ -6,8 +6,7 @@ use genpdf::{
     Alignment, Element,
 };
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use tokio::fs;
+use std::io::Cursor;
 
 use crate::{config::CompanyConfiguration, utils::number_to_words::NumberToWords};
 
@@ -40,7 +39,7 @@ pub struct Invoice {
 #[derive(Debug)]
 pub struct GeneratedInvoice {
     pub invoice: Invoice,
-    pub file_path: PathBuf,
+    pub pdf_bytes: Vec<u8>,
     pub file_size: u64,
 }
 
@@ -56,12 +55,11 @@ impl InvoiceService {
         }
     }
 
-    pub async fn generate_and_store_invoice(
+    pub async fn generate_invoice_pdf(
         &self,
         invoice_number: i32,
         print_count: i32,
         order_id: String,
-        customer_id: String,
         customer_name: String,
         customer_address: String,
         items: Vec<InvoiceItem>,
@@ -74,91 +72,28 @@ impl InvoiceService {
             items,
         )?;
 
-        let mut file_path = PathBuf::from(&self.config.invoice_storage_base_dir)
-            .join(&customer_id)
-            .join(&order_id);
-
-        Self::ensure_storage_dir(&file_path).await?;
-
-        file_path = file_path.join(format!("{}.pdf", &invoice.invoice_number));
-
         let invoice_clone = invoice.clone();
-        let file_path_clone = file_path.clone();
+        let order_id_clone = order_id.clone();
 
-        tokio::task::spawn_blocking(move || -> Result<()> {
-            Self::generate_pdf_blocking(&invoice_clone, &order_id, &file_path_clone)
+        let pdf_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>> {
+            Self::generate_pdf_bytes(&invoice_clone, &order_id_clone)
         })
         .await
         .context("PDF generation task failed")?
         .context("PDF generation failed")?;
 
-        let file_size = self.get_file_size(&file_path).await?;
+        let file_size = pdf_bytes.len() as u64;
 
         println!(
-            "Invoice PDF generated successfully: {} ({}KB)",
-            file_path.display(),
+            "Invoice PDF generated successfully in memory: {} ({}KB)",
+            invoice.invoice_number,
             file_size / 1024
         );
 
         Ok(GeneratedInvoice {
             invoice,
-            file_path,
+            pdf_bytes,
             file_size,
-        })
-    }
-
-    pub async fn read_invoice_bytes(&self, file_path: &Path) -> Result<Vec<u8>> {
-        let bytes = fs::read(file_path)
-            .await
-            .context("Failed to read invoice PDF file")?;
-
-        println!(
-            "Read {} bytes from invoice file: {}",
-            bytes.len(),
-            file_path.display()
-        );
-        Ok(bytes)
-    }
-
-    pub async fn cleanup_invoice_file(&self, file_path: &Path) -> Result<()> {
-        if file_path.exists() {
-            fs::remove_file(file_path)
-                .await
-                .context("Failed to delete invoice file")?;
-
-            println!("Cleaned up invoice file: {}", file_path.display());
-        }
-        Ok(())
-    }
-
-    pub async fn list_stored_invoices(&self, file_path: &Path) -> Result<Vec<PathBuf>> {
-        let mut invoices = Vec::new();
-
-        let mut dir = fs::read_dir(file_path)
-            .await
-            .context("Failed to read invoice storage directory")?;
-
-        while let Some(entry) = dir.next_entry().await? {
-            let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "pdf") {
-                invoices.push(path);
-            }
-        }
-
-        invoices.sort();
-        Ok(invoices)
-    }
-
-    pub async fn get_invoice_info(&self, file_path: &Path) -> Result<InvoiceFileInfo> {
-        let metadata = fs::metadata(file_path)
-            .await
-            .context("Failed to get file metadata")?;
-
-        Ok(InvoiceFileInfo {
-            path: file_path.to_path_buf(),
-            size: metadata.len(),
-            created: metadata.created().ok(),
-            modified: metadata.modified().ok(),
         })
     }
 
@@ -191,34 +126,12 @@ impl InvoiceService {
         })
     }
 
-    async fn ensure_storage_dir(path: &Path) -> Result<()> {
-        fs::create_dir_all(path)
-            .await
-            .context("Failed to create invoice storage directory")?;
-        Ok(())
-    }
-
-    // fn generate_filename(&self, invoice_number: &str) -> String {
-    //     format!(
-    //         "{}_{}.pdf",
-    //         invoice_number,
-    //         Uuid::new_v4().to_string()[..8].to_lowercase()
-    //     )
-    // }
-
-    async fn get_file_size(&self, file_path: &Path) -> Result<u64> {
-        let metadata = fs::metadata(file_path)
-            .await
-            .context("Failed to get file metadata")?;
-        Ok(metadata.len())
-    }
-
-    fn generate_pdf_blocking(invoice: &Invoice, order_id: &String, file_path: &Path) -> Result<()> {
+    fn generate_pdf_bytes(invoice: &Invoice, order_id: &String) -> Result<Vec<u8>> {
         use genpdf::{elements::*, fonts, Document};
 
         let font_family = fonts::from_files(
-            "/usr/share/fonts/Adwaita",
-            "Adwaita",
+            "/usr/share/fonts/truetype/liberation",
+            "LiberationSans",
             Some(genpdf::fonts::Builtin::Helvetica),
         )
         .context("Failed to load font family")?;
@@ -249,10 +162,14 @@ impl InvoiceService {
         doc.push(layout);
 
         doc.set_minimal_conformance(); //meta-data are removed
-        doc.render_to_file(file_path)
-            .context("Failed to render PDF to file")?;
 
-        Ok(())
+        // Generate PDF to a Vec<u8> in memory
+        let mut buffer = Vec::new();
+        let mut cursor = Cursor::new(&mut buffer);
+        doc.render(&mut cursor)
+            .context("Failed to render PDF to memory")?;
+
+        Ok(buffer)
     }
 
     fn create_header(invoice: &Invoice) -> LinearLayout {
@@ -416,10 +333,3 @@ impl InvoiceService {
     }
 }
 
-#[derive(Debug)]
-pub struct InvoiceFileInfo {
-    pub path: PathBuf,
-    pub size: u64,
-    pub created: Option<std::time::SystemTime>,
-    pub modified: Option<std::time::SystemTime>,
-}

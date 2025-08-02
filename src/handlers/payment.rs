@@ -701,7 +701,6 @@ pub async fn khalti_payment_confirmation(
                                     invoice.get_id(),
                                     invoice.invoice_number(),
                                     order_id_clone,
-                                    order.user.uuid,
                                     format!("{} {}", order.user.first_name, order.user.last_name),
                                     order.user.email,
                                     order.delivery_location,
@@ -1010,7 +1009,6 @@ pub async fn create_payment(
                     created_inv_id,
                     created_inv_number,
                     created_order_id_clone,
-                    order_user_id,
                     user_fullname_for_invoice,
                     user_email_for_invoice,
                     order_delivery_location,
@@ -1284,7 +1282,6 @@ async fn send_email_with_invoice(
     invoice_id: i32,
     invoice_no: i32,
     created_order_id: String,
-    inv_user_id: String,
     user_name: String,
     user_email: String,
     order_delivery_location: String,
@@ -1300,12 +1297,12 @@ async fn send_email_with_invoice(
 
     let invoice_service = InvoiceService::new(company_config);
 
+    // Generate PDF directly in memory
     let invoice_result = invoice_service
-        .generate_and_store_invoice(
+        .generate_invoice_pdf(
             invoice_id,
             invoice_no,
             created_order_id.clone(),
-            inv_user_id,
             user_name.clone(),
             order_delivery_location,
             inv_items,
@@ -1314,30 +1311,24 @@ async fn send_email_with_invoice(
 
     match invoice_result {
         Ok(generated_invoice) => {
-            match invoice_service
-                .read_invoice_bytes(&generated_invoice.file_path)
+            // PDF bytes are already available in memory
+            match email_service_for_invoice
+                .send_invoice_email(
+                    &user_email,
+                    &user_name,
+                    &generated_invoice.invoice,
+                    &generated_invoice.pdf_bytes,
+                )
                 .await
             {
-                Ok(pdf_bytes) => {
-                    match email_service_for_invoice
-                        .send_invoice_email(
-                            &user_email,
-                            &user_name,
-                            &generated_invoice.invoice,
-                            &pdf_bytes,
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            println!(
-                                "Invoice email sent successfully for order {}",
-                                created_order_id
-                            );
-                        }
-                        Err(e) => println!("Failed to send invoice email: {:?}", e),
-                    }
+                Ok(()) => {
+                    println!(
+                        "Invoice email sent successfully for order {} (PDF size: {}KB)",
+                        created_order_id,
+                        generated_invoice.file_size / 1024
+                    );
                 }
-                Err(e) => println!("Error reading invoice PDF bytes: {:?}", e),
+                Err(e) => println!("Failed to send invoice email: {:?}", e),
             }
         }
         Err(e) => println!("Failed to generate invoice: {:?}", e),

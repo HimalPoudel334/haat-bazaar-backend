@@ -3,7 +3,7 @@ use diesel::prelude::*;
 use uuid::Uuid;
 
 use crate::{
-    config::{CompanyConfiguration, EmailConfiguration},
+    config::CompanyConfiguration,
     contracts::{
         invoice::{Invoice, InvoiceOnly, InvoiceQueryParams, NewInvoice},
         invoice_item::InvoiceItem,
@@ -11,7 +11,7 @@ use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         invoice::{Invoice as InvoiceModel, NewInvoice as NewInvoiceModel},
-        invoice_item::{InvoiceItem as InvoiceItemModel, NewInvoiceItem as NewInvoiceItemModel},
+        invoice_item::NewInvoiceItem as NewInvoiceItemModel,
         order::Order as OrderModel,
         payment::Payment as PaymentModel,
         product::Product as ProductModel,
@@ -224,8 +224,6 @@ pub async fn get_invoice_file(
     use crate::schema::products::dsl::*;
     use crate::schema::users::dsl::*;
     use crate::schema::{invoice_items, invoices, orders, products, users};
-    use std::path::Path;
-    use tokio::fs;
 
     let conn = &mut get_conn(&pool);
 
@@ -235,8 +233,7 @@ pub async fn get_invoice_file(
     }
 
     if !is_safe_component(&params.order_id) {
-        return HttpResponse::BadRequest()
-            .json(serde_json::json!({"message": "invalid user_id or order_id"}));
+        return HttpResponse::BadRequest().json(serde_json::json!({"message": "invalid order_id"}));
     }
 
     let invoice = match invoices
@@ -267,93 +264,74 @@ pub async fn get_invoice_file(
             ),
     };
 
-    let invoice_filename = format!("{:07}.pdf", invoice.0);
+    let inv_items = match invoice_items
+        .inner_join(products.on(invoice_items::product_id.eq(products::id)))
+        .filter(invoice_items::invoice_id.eq(invoice.0))
+        .select((
+            products::name,
+            invoice_items::quantity,
+            invoice_items::unit_price,
+            products::unit,
+            invoice_items::total,
+        ))
+        .load::<InvoiceItemService>(conn)
+    {
+        Ok(items) => items,
+        Err(_) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({
+                    "message": "Invoice items not found"
+                }))
+        }
+    };
 
-    let file_path = Path::new(&company_config.invoice_storage_base_dir)
-        .join(&invoice.3)
-        .join(&params.order_id)
-        .join(&invoice_filename);
-
-    let invoice_bytes =
-        match fs::read(&file_path).await {
-            Ok(file_content) => file_content,
-            Err(_) => {
-                let inv_items = match invoice_items
-                    .inner_join(products.on(invoice_items::product_id.eq(products::id)))
-                    .filter(invoice_items::invoice_id.eq(invoice.0))
-                    .select((
-                        products::name,
-                        invoice_items::quantity,
-                        invoice_items::unit_price,
-                        products::unit,
-                        invoice_items::total,
-                    ))
-                    .load::<InvoiceItemService>(conn)
-                {
-                    Ok(items) => items,
-                    Err(_) => {
-                        return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
-                            serde_json::json!({
-                                "message": "Invoice not found"
-                            }),
-                        )
-                    }
-                };
-
-                let invoice_service = InvoiceService::new(company_config.get_ref());
-                let invoice_result = invoice_service
-                    .generate_and_store_invoice(
-                        invoice.0,
-                        invoice.5,
-                        params.order_id.clone(),
-                        invoice.3,
-                        invoice.4,
-                        invoice.2,
-                        inv_items,
-                    )
-                    .await;
-
-                match invoice_result {
-                    Ok(generated_invoice) => {
-                        match invoice_service
-                            .read_invoice_bytes(&generated_invoice.file_path)
-                            .await
-                        {
-                            Ok(pdf_bytes) => pdf_bytes,
-                            Err(_) => return HttpResponse::InternalServerError()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .json(serde_json::json!({
-                                    "message": "Ops! something went wrong when searching invoice"
-                                })),
-                        }
-                    }
-                    Err(_) => {
-                        return HttpResponse::InternalServerError()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .json(serde_json::json!({
-                                "message": "Ops! something went wrong when creating invoice"
-                            }))
-                    }
-                }
-            }
-        };
+    let invoice_service = InvoiceService::new(company_config.get_ref());
+    let invoice_bytes = match invoice_service
+        .generate_invoice_pdf(
+            invoice.0,
+            invoice.5,
+            params.order_id.clone(),
+            invoice.4,
+            invoice.2,
+            inv_items,
+        )
+        .await
+    {
+        Ok(generated_invoice) => generated_invoice.pdf_bytes,
+        Err(e) => {
+            println!("Failed to generate invoice PDF: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({
+                    "message": "Failed to generate invoice PDF"
+                }));
+        }
+    };
 
     match diesel::update(invoices.filter(invoices::id.eq(invoice.0)))
         .set(invoices::invoice_number.eq(invoices::invoice_number + 1))
         .execute(conn)
     {
-        Ok(_) => HttpResponse::Ok()
-            .content_type("application/pdf")
-            .append_header((
-                "Content-Disposition",
-                format!("attachment; filename=\"{}\"", invoice_filename),
-            ))
-            .body(invoice_bytes),
-        Err(_) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({
-                "message": "Ops! something went wrong when creating invoice"
-            })),
+        Ok(_) => {
+            let invoice_filename = format!("{:07}.pdf", invoice.0);
+
+            HttpResponse::Ok()
+                .content_type("application/pdf")
+                .append_header((
+                    "Content-Disposition",
+                    format!("attachment; filename=\"{}\"", invoice_filename),
+                ))
+                .body(invoice_bytes)
+        }
+        Err(e) => {
+            println!("Failed to update invoice number (print count): {:?}", e);
+            HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({
+                    "message": "Failed to update invoice print count"
+                }))
+        }
     }
 }
 
