@@ -87,9 +87,10 @@ where
                         println!("JWT verification failed: {}", e);
                     }
                 }
-            } else {
-                println!("No valid Bearer token found in Authorization header.");
             }
+            // else {
+            //     println!("No valid Bearer token found in Authorization header.");
+            // }
 
             service.call(req).await
         }

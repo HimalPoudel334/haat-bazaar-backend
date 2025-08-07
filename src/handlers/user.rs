@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{
     base_types::{email::Email, phone_number::PhoneNumber},
-    contracts::user::{User, UserCreate},
+    contracts::user::{User, UserCreate, UserPendingShipments},
     db::connection::{get_conn, SqliteConnectionPool},
     models::user::{NewUser, User as UserModel},
 };
@@ -247,6 +247,41 @@ pub async fn get_user_from_email(
         Err(e) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
+    }
+}
+
+#[get("/staffs")]
+pub async fn get_staff_users(pool: web::Data<SqliteConnectionPool>) -> impl Responder {
+    let conn = &mut get_conn(&pool);
+
+    match diesel::sql_query(
+    r#"
+    SELECT 
+        users.uuid AS user_id,
+        users.first_name || ' ' || users.last_name AS full_name,
+        users.location,
+        users.nearest_landmark,
+        COALESCE(
+            SUM(CASE WHEN shipments.status = 'pending' THEN 1 ELSE 0 END), 
+            0
+        ) AS pending_shipment_count
+    FROM users
+    LEFT JOIN shipments 
+      ON shipments.assigned_to = users.id
+      AND shipments.address LIKE '%' || substr(users.location, 1, instr(users.location, ',') - 1) || '%'
+      AND shipments.address LIKE '%' || users.nearest_landmark || '%'
+    WHERE users.user_type = ?
+    GROUP BY users.uuid, users.first_name, users.last_name, users.location, users.nearest_landmark;
+    "#
+    )
+    .bind::<diesel::sql_types::Text, _>(UserModel::USERTYPE_DELIVERY)
+    .load::<UserPendingShipments>(conn)    {
+        Ok(uv) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"users": uv})),
+        Err(e) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": e.to_string()})),
     }
 }
 

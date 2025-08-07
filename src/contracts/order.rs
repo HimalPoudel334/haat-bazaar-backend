@@ -19,31 +19,10 @@ pub struct Order {
     pub user_id: String,
 }
 
-#[derive(Serialize, Queryable)]
+#[derive(Serialize, QueryableByName)]
+#[diesel(check_for_backend(Sqlite))]
 #[serde(rename_all = "camelCase")]
 pub struct AllOrderResponse {
-    #[serde(rename = "id")]
-    pub uuid: String,
-    pub created_on: String,
-    pub fulfilled_on: String,
-    pub delivery_charge: f64,
-    pub delivery_location: String,
-    pub delivery_status: String,
-    pub total_price: f64,
-    pub discount: f64,
-    pub amount: f64,
-    pub status: String,
-    pub quantity: f64,
-    pub unit: String,
-    pub product_image: String,
-    pub product_name: String,
-}
-
-#[derive(Debug, QueryableByName)]
-#[diesel(check_for_backend(Sqlite))]
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AllOrderResponse1 {
     #[diesel(sql_type = Text)]
     #[serde(rename = "id")]
     pub uuid: String,
@@ -254,4 +233,18 @@ pub struct OrderCreatedPayload {
     pub order_id: String,
     pub customer_name: String,
     pub total_amount: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckOrderDuplicateRequest {
+    pub user_id: String,
+    pub product_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckOrderDuplicateResponse {
+    pub has_duplicates: bool,
+    pub message: Option<String>,
 }

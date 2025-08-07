@@ -2,7 +2,7 @@ use diesel::prelude::*;
 
 use super::order::Order;
 
-#[derive(Queryable, Selectable, Associations)]
+#[derive(Queryable, Selectable, Associations, Identifiable)]
 #[diesel(table_name = crate::schema::shipments)]
 #[diesel(belongs_to(Order))]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -18,6 +18,52 @@ pub struct Shipment {
     order_id: i32,
     status: String,
     assigned_to: Option<i32>,
+}
+
+impl Shipment {
+    pub fn get_id(&self) -> i32 {
+        self.id
+    }
+
+    pub fn get_uuid(&self) -> &str {
+        &self.uuid
+    }
+
+    pub fn get_ship_date(&self) -> &str {
+        &self.ship_date
+    }
+
+    pub fn get_address(&self) -> &str {
+        &self.address
+    }
+
+    pub fn get_city(&self) -> &str {
+        &self.city
+    }
+
+    pub fn get_state(&self) -> &str {
+        &self.state
+    }
+
+    pub fn get_country(&self) -> &str {
+        &self.country
+    }
+
+    pub fn get_zip_code(&self) -> &str {
+        &self.zip_code
+    }
+
+    pub fn get_order_id(&self) -> i32 {
+        self.order_id
+    }
+
+    pub fn get_status(&self) -> &str {
+        &self.status
+    }
+
+    pub fn get_assigned_to(&self) -> Option<i32> {
+        self.assigned_to
+    }
 }
 
 #[derive(Insertable)]

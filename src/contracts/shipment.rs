@@ -1,5 +1,5 @@
 use diesel::prelude::Queryable;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Queryable)]
 #[serde(rename_all = "camelCase")]
@@ -16,4 +16,11 @@ pub struct Shipment {
     assigned_to: Option<String>,
     first_name: Option<String>,
     last_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssingShipment {
+    pub shipment_id: String,
+    pub user_id: String,
 }

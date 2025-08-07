@@ -10,11 +10,14 @@ use crate::{
         payment_status::PaymentStatus,
     },
     config::EmailConfiguration,
-    contracts::order::{
-        AllOrderResponse1, CartCheckout, CategoryResponse, DateFilterParams, Order, OrderCreate,
-        OrderDeliveryStatus, OrderEdit, OrderItemResponse, OrderResponse,
-        OrderStatus as OrderStatusUpdate, PaymentResponse, ProductResponse, ShipmentResponse,
-        UserOrderResponse, UserResponse,
+    contracts::{
+        order::{
+            AllOrderResponse, CartCheckout, CategoryResponse, CheckOrderDuplicateRequest,
+            CheckOrderDuplicateResponse, DateFilterParams, Order, OrderCreate, OrderDeliveryStatus,
+            OrderEdit, OrderItemResponse, OrderResponse, OrderStatus as OrderStatusUpdate,
+            PaymentResponse, ProductResponse, ShipmentResponse, UserOrderResponse, UserResponse,
+        },
+        ResponseWrapper,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -81,7 +84,7 @@ pub async fn get_orders(
     )
     .bind::<diesel::sql_types::Text, _>(filters.init_date.clone())
     .bind::<diesel::sql_types::Text, _>(final_date)
-    .load::<AllOrderResponse1>(conn);
+    .load::<AllOrderResponse>(conn);
 
     match results {
         Ok(r) =>
@@ -567,6 +570,53 @@ pub async fn get_user_orders(
     }
 }
 
+#[get("/check-duplicate")]
+pub async fn check_duplicate_order(
+    data: web::Json<CheckOrderDuplicateRequest>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    use crate::schema::order_items::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::{order_items, orders, products, users};
+
+    let conn = &mut get_conn(&pool);
+
+    let exists = match diesel::select(diesel::dsl::exists(
+        orders
+            .inner_join(users)
+            .inner_join(order_items)
+            .inner_join(products.on(order_items::product_id.eq(products::id)))
+            .filter(users::uuid.eq(&data.user_id))
+            .filter(orders::status.eq(OrderStatus::Pending.value()))
+            .filter(products::uuid.eq_any(&data.product_ids)),
+    ))
+    .get_result::<bool>(conn)
+    {
+        Ok(a) => a,
+        Err(_) => return HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(
+                serde_json::json!({"message": "Ops! something went wrong when searching order"}),
+            ),
+    };
+
+    let response = CheckOrderDuplicateResponse {
+        has_duplicates: exists,
+        message: if exists {
+            Some(
+                "Some products already exist in pending orders. Do you wish to continue?"
+                    .to_string(),
+            )
+        } else {
+            None
+        },
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({"data": response}))
+}
+
 #[post("")]
 pub async fn create(
     order_json: web::Json<OrderCreate>,
@@ -599,8 +649,6 @@ pub async fn create(
     }
 
     let conn = &mut get_conn(&pool);
-
-    let mut created_order_id: String = String::new();
 
     let (order_total, order_quantity, order_discount) =
         order_json
@@ -639,7 +687,9 @@ pub async fn create(
         }
     };
 
-    match conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+    let mut created_order_id: String = String::new();
+
+    match conn.transaction::<ResponseWrapper, diesel::result::Error, _>(|con| {
         let new_order = NewOrder::new(
             &user,
             &order_json.created_on,
@@ -713,16 +763,22 @@ pub async fn create(
             {
                 Some(p) => p,
                 None => {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Product not found for order"
-                    })));
+                    return Ok(ResponseWrapper {
+                        success: false,
+                        response: HttpResponse::BadRequest().json(serde_json::json!({
+                            "message": "Product not found for order"
+                        })),
+                    });
                 }
             };
 
             if product.get_stock() < order_item.quantity {
-                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "Product out of stock"
-                })));
+                return Ok(ResponseWrapper {
+                    success: false,
+                    response: HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product out of stock"
+                    })),
+                });
             }
 
             let new_order_item =
@@ -753,11 +809,18 @@ pub async fn create(
             delivery_status: order.get_delivery_status().to_owned(),
         };
 
-        Ok(HttpResponse::Ok()
-            .status(StatusCode::OK)
-            .json(serde_json::json!({"order": order_vm})))
+        Ok(ResponseWrapper {
+            success: true,
+            response: HttpResponse::Ok()
+                .status(StatusCode::OK)
+                .json(serde_json::json!({"order": order_vm})),
+        })
     }) {
         Ok(response) => {
+            if !response.success {
+                return response.response;
+            }
+
             let email_service = EmailServiceFactory::create_gmail_service(email_config.get_ref());
 
             let created_order_id_clone = created_order_id.clone();
@@ -786,7 +849,7 @@ pub async fn create(
             if PaymentMethod::from_str(&order_json.payment.payment_method).unwrap()
                 != PaymentMethod::Cash
             {
-                return response;
+                return response.response;
             }
 
             let order_created_payload = NewOrderPayload {
@@ -811,7 +874,7 @@ pub async fn create(
                 }
             });
 
-            response
+            response.response
         }
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
             "message": format!("Failed to process order transaction: {}", e)
@@ -880,7 +943,7 @@ pub async fn create_orders_from_cart(
     }
 
     // validate cart items exists
-    let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+    let result = conn.transaction::<ResponseWrapper, diesel::result::Error, _>(|con| {
         let mut order_items_vec: Vec<(CartModel, ProductModel)> = vec![];
         let mut order_total_price = 0.0;
         let mut order_total_quantity = 0.0;
@@ -894,9 +957,12 @@ pub async fn create_orders_from_cart(
             {
                 Some(c) => c,
                 None => {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": format!("Cart not found: {}", cart_id)
-                    })));
+                    return Ok(ResponseWrapper {
+                        success: false,
+                        response: HttpResponse::BadRequest().json(serde_json::json!({
+                            "message": format!("Cart not found: {}", cart_id)
+                        })),
+                    });
                 }
             };
 
@@ -907,16 +973,22 @@ pub async fn create_orders_from_cart(
             {
                 Some(p) => p,
                 None => {
-                    return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Product not found for order"
-                    })));
+                    return Ok(ResponseWrapper {
+                        success: false,
+                        response: HttpResponse::BadRequest().json(serde_json::json!({
+                            "message": "Product not found for order"
+                        })),
+                    });
                 }
             };
 
             if product.get_stock() < cart.get_quantity() {
-                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "Product out of stock"
-                })));
+                return Ok(ResponseWrapper {
+                    success: false,
+                    response: HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Product out of stock"
+                    })),
+                });
             }
 
             order_total_price += cart.get_quantity() as f64 * product.get_price();
@@ -1007,44 +1079,19 @@ pub async fn create_orders_from_cart(
 
                 //delete from cart
                 diesel::delete(&cart).execute(con)?;
-
-                return Ok(HttpResponse::Ok().json(serde_json::json!({
-                    "message": "Order created successfully",
-                    "order_id": &inserted_order.get_uuid()
-                })));
             }
         }
-
-        // Now insert all order items
-        for (cart, product) in order_items_vec {
-            let new_order_item = NewOrderItemModel::new(
-                cart.get_quantity(),
-                cart.get_discount(),
-                &product,
-                &inserted_order,
-            );
-
-            diesel::insert_into(order_items)
-                .values(&new_order_item)
-                .execute(con)?;
-
-            //update the product stock if order creation successful
-            diesel::update(&product)
-                .set(products::stock.eq(products::stock - cart.get_quantity()))
-                .execute(con)?;
-
-            //delete from cart
-            diesel::delete(&cart).execute(con)?;
-        }
-
-        Ok(HttpResponse::Ok().json(serde_json::json!({
-            "message": "Order created successfully",
-            "order_id": inserted_order.get_uuid()
-        })))
+        Ok(ResponseWrapper {
+            success: true,
+            response: HttpResponse::Ok().json(serde_json::json!({
+                "message": "Order created successfully",
+                "order_id": inserted_order.get_uuid()
+            })),
+        })
     });
 
     match result {
-        Ok(response) => response,
+        Ok(response) => response.response,
         Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
             "message": "Failed to process order transaction"
         })),

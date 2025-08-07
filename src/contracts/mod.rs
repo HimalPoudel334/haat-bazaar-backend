@@ -1,3 +1,5 @@
+use actix_web::HttpResponse;
+
 pub mod admin_device;
 pub mod auth;
 pub mod cart;
@@ -12,3 +14,8 @@ pub mod product;
 pub mod product_image;
 pub mod shipment;
 pub mod user;
+
+pub struct ResponseWrapper {
+    pub success: bool,
+    pub response: HttpResponse,
+}

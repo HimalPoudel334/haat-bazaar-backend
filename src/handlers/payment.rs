@@ -27,6 +27,7 @@ use crate::{
             EsewaCallbackResponse, KhaltiPaymentLookupResponse, KhaltiPidxPayload, NewPayment,
             Payment,
         },
+        ResponseWrapper,
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
@@ -338,44 +339,38 @@ pub async fn esewa_payment_confirmation(
     )
     .await;
 
-    let response: HttpResponse = match verification_result {
+    match verification_result {
         Ok(vr) => {
-            let order_id = vr.product_id.clone();
-            let order: OrderResponse = match get_order_details(&order_id, &pool).await {
-                Ok(o) => o,
-                Err(http_response) => return http_response,
-            };
-
-            let payment: NewPayment = NewPayment {
-                payment_method: PaymentMethod::Esewa.value().to_string(),
-                user_id: order.user.uuid,
-                order_id: order.uuid,
-                amount: vr.total_amount.parse::<f64>().unwrap_or(0.0),
-                tendered: vr.total_amount.parse::<f64>().unwrap_or(0.0), //same as amount in case of payment providers
-                transaction_id: Some(vr.transaction_details.reference_id.to_owned()),
-                status: vr.transaction_details.status.to_owned(),
-            };
-
-            create_payment(
-                web::Json(payment),
-                &pool,
-                notification_service,
-                company_config,
-                email_config,
+            let order_id = vr.product_id.clone(); // product_id is actually order id.
+            match handle_notification_and_email(
+                &order_id,
+                &vr.transaction_details.reference_id,
+                vr.total_amount.parse::<f64>().unwrap_or(0.0),
+                0.0, // hopefully we could determine the fee later
+                &vr.transaction_details.status,
+                PaymentMethod::Esewa,
+                notification_service.get_ref(),
+                company_config.get_ref(),
+                email_config.get_ref(),
+                pool,
             )
             .await
+            {
+                Ok(()) => HttpResponse::Ok()
+                    .status(StatusCode::OK)
+                    .json(serde_json::json!({"message": "Payment verification successful"})),
+                Err(res) => res,
+            }
         }
         Err(e) => {
-            eprintln!("{e:?}");
+            eprintln!("Verification failed: {e:?}");
             HttpResponse::BadRequest().json(serde_json::json!({
                 "status": "failure",
-                "verification": "incomplete",
+                "verification": "failed",
                 "errorMessage": e.to_string()
             }))
         }
-    };
-
-    response
+    }
 }
 
 async fn verify_transaction(
@@ -560,15 +555,6 @@ pub async fn khalti_payment_confirmation(
 ) -> impl Responder {
     println!("Hit by khalti confirmation");
 
-    use crate::schema::invoice_items::dsl::*;
-    use crate::schema::invoices::dsl::*;
-    use crate::schema::orders::dsl::*;
-    use crate::schema::payments::dsl::*;
-    use crate::schema::products::dsl::*;
-    use crate::schema::{invoice_items, orders, payments, products};
-
-    let conn = &mut get_conn(&pool);
-
     let data = serde_json::json!({
         "pidx": params.pidx
     });
@@ -584,192 +570,60 @@ pub async fn khalti_payment_confirmation(
         .json(&data)
         .send()
         .await;
-
     match khalti_response_result {
         Ok(res) => match res.status() {
             reqwest::StatusCode::OK => match res.json::<KhaltiPaymentLookupResponse>().await {
                 Ok(khalti_response) => {
                     println!("Confirmation response: {:?}", khalti_response);
 
-                    let order: OrderResponse =
-                        match get_order_details(&params.purchase_order_id, &pool).await {
-                            Ok(o) => o,
-                            Err(http_response) => return http_response,
-                        };
-
-                    if order.payment.is_none() {
-                        return HttpResponse::NotFound()
-                            .status(StatusCode::NOT_FOUND)
-                            .json(serde_json::json!({"message": "Payment not found for order."}));
+                    match handle_notification_and_email(
+                        &params.purchase_order_id,
+                        &khalti_response.transaction_id.unwrap_or_default(),
+                        khalti_response.total_amount / 100.0,
+                        khalti_response.fee / 100.0,
+                        &khalti_response.status,
+                        PaymentMethod::Khalti,
+                        notification_service.get_ref(),
+                        company_config.get_ref(),
+                        email_config.get_ref(),
+                        pool,
+                    )
+                    .await
+                    {
+                        Ok(()) => HttpResponse::Ok().json(serde_json::json!({
+                            "message": "Payment verification successful"
+                        })),
+                        Err(res) => res,
                     }
-
-                    // update the payment
-                    let payment: PaymentModel = match payments
-                        .filter(payments::uuid.eq(&order.payment.unwrap().uuid)) //payment must
-                        .select(PaymentModel::as_select())
-                        .first(conn)
-                        .optional()
-                    {
-                        Ok(Some(p)) => p,
-                        Ok(None) => {
-                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
-                                serde_json::json!({"message": "Payment not found for order."}),
-                            )
-                        }
-                        Err(_) => {
-                            return HttpResponse::InternalServerError()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .json(serde_json::json!({"message": "ops! something went wrong"}))
-                        }
-                    };
-
-                    let invoice = match invoices
-                        .inner_join(orders)
-                        .inner_join(payments)
-                        .filter(orders::uuid.eq(&order.uuid))
-                        .filter(payments::id.eq(payment.get_id()))
-                        .select(crate::models::invoice::Invoice::as_select())
-                        .first(conn)
-                        .optional()
-                    {
-                        Ok(Some(inv)) => inv,
-                        Ok(None) => {
-                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
-                                serde_json::json!({"message": "Invoice not found for order."}),
-                            );
-                        }
-                        Err(_) => {
-                            return HttpResponse::InternalServerError()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .json(serde_json::json!({"message": "ops! something went wrong"}));
-                        }
-                    };
-
-                    let inv_items = match invoice_items
-                        .inner_join(products.on(invoice_items::product_id.eq(products::id)))
-                        .filter(invoice_items::invoice_id.eq(invoice.get_id()))
-                        .select((
-                            products::name,
-                            invoice_items::quantity,
-                            invoice_items::unit_price,
-                            products::unit,
-                            invoice_items::total,
-                        ))
-                        .load::<InvoiceItem>(conn)
-                    {
-                        Ok(items) => items,
-                        Err(_) => {
-                            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
-                                serde_json::json!({
-                                    "message": "Invoice not found"
-                                }),
-                            )
-                        }
-                    };
-
-                    match diesel::update(&payment)
-                        .set((
-                            payments::transaction_id.eq(khalti_response
-                                .transaction_id
-                                .as_deref()
-                                .unwrap_or_default()),
-                            payments::status.eq(&khalti_response.status),
-                            payments::service_charge.eq(&khalti_response.fee / 100.0), //all
-                        ))
-                        .execute(conn)
-                    {
-                        Ok(_) => {
-                            let order_id_clone = order.uuid.clone();
-
-                            tokio::spawn(async move {
-                                send_order_notification(
-                                    notification_service.get_ref(),
-                                    order.uuid.clone(),
-                                    payment.get_transaction_id().to_string(),
-                                    khalti_response.total_amount / 100.0,
-                                    PaymentMethod::Khalti.value().to_string(),
-                                )
-                                .await;
-                            });
-
-                            tokio::spawn(async move {
-                                send_email_with_invoice(
-                                    email_config.get_ref(),
-                                    company_config.get_ref(),
-                                    invoice.get_id(),
-                                    invoice.invoice_number(),
-                                    order_id_clone,
-                                    format!("{} {}", order.user.first_name, order.user.last_name),
-                                    order.user.email,
-                                    order.delivery_location,
-                                    inv_items,
-                                )
-                                .await;
-                            });
-                        }
-                        Err(_) => {
-                            return HttpResponse::InternalServerError()
-                                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                                .json(serde_json::json!({"message": "ops! something went wrong"}))
-                        }
-                    }
-
-                    // let response = Payment {
-                    //     uuid: payment.get_uuid().to_owned(),
-                    //     payment_method: payment.get_payment_method().to_owned(),
-                    //     pay_date: payment.get_pay_date().to_owned(),
-                    //     user_id: order.user.uuid.to_owned(),
-                    //     order_id: order.uuid.to_owned(),
-                    //     amount: payment.get_amount(),
-                    //     transaction_id: khalti_response.transaction_id.unwrap_or_default(),
-                    //     tendered: payment.get_tendered(),
-                    //     change: payment.get_change(),
-                    //     discount: payment.get_discount(),
-                    //     status: payment.get_status().to_owned(),
-                    //     refunded: payment.is_refunded(),
-                    //     service_charge: payment.get_service_charge(),
-                    // };
-
-                    HttpResponse::Ok().status(StatusCode::OK).finish()
-                    // .json(serde_json::json!({"payment": response}))
                 }
                 Err(er) => {
                     eprintln!("{er}");
-                    return HttpResponse::InternalServerError()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .json(serde_json::json!({
-                            "message": format!("Error parsing response from Khalti: {}", er)
-                        }));
+                    HttpResponse::InternalServerError().json(serde_json::json!({
+                        "message": format!("Error parsing response from Khalti: {}", er)
+                    }))
                 }
             },
             _ => match res.json::<serde_json::Value>().await {
                 Ok(v) => {
                     println!("Failed verification: {v}");
-
-                    return HttpResponse::BadRequest()
-                        .status(StatusCode::BAD_REQUEST)
-                        .json(serde_json::json!({
-                            "message": "Payment verification failed",
-                            "details": v
-                        }));
+                    HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Payment verification failed",
+                        "details": v
+                    }))
                 }
                 Err(e) => {
                     eprintln!("{e}");
-                    return HttpResponse::InternalServerError()
-                        .status(StatusCode::INTERNAL_SERVER_ERROR)
-                        .json(serde_json::json!({
-                            "message": format!("Error parsing error response from Khalti: {}", e)
-                        }));
+                    HttpResponse::InternalServerError().json(serde_json::json!({
+                        "message": format!("Error parsing error response from Khalti: {}", e)
+                    }))
                 }
             },
         },
         Err(e) => {
             eprintln!("{e}");
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({
-                    "message": format!("Error getting response from Khalti: {}", e)
-                }));
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "message": format!("Error getting response from Khalti: {}", e)
+            }))
         }
     }
 }
@@ -852,7 +706,7 @@ pub async fn create_payment(
     let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
 
     // Start DB transaction
-    let result = conn.transaction::<HttpResponse, diesel::result::Error, _>(|con| {
+    let result = conn.transaction::<ResponseWrapper, diesel::result::Error, _>(|con| {
         // Fetch order
         let order: OrderModel = match orders_dsl::orders
             .filter(orders_dsl::uuid.eq(&o_uuid.to_string()))
@@ -862,24 +716,33 @@ pub async fn create_payment(
         {
             Some(o) => o,
             None => {
-                return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "Order not found"
-                })))
+                return Ok(ResponseWrapper {
+                    success: false,
+                    response: HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Order not found"
+                    })),
+                })
             }
         };
 
         // Verify ownership
         if order.get_user_id() != user.get_id() {
-            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                "message": "Users do not match"
-            })));
+            return Ok(ResponseWrapper {
+                success: false,
+                response: HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "User do not match"
+                })),
+            });
         }
 
         // Verify amount
         if order.get_total_price() != payment_json.amount {
-            return Ok(HttpResponse::BadRequest().json(serde_json::json!({
-                "message": "Order total and payment amount did not match"
-            })));
+            return Ok(ResponseWrapper {
+                success: false,
+                response: HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "Order total and payment total do not match"
+                })),
+            });
         }
 
         created_order_id = order.get_uuid().to_string();
@@ -958,30 +821,20 @@ pub async fn create_payment(
                 total: item.get_quantity() * product.get_price(),
             });
         }
-        //
-        // // Prepare API response
-        // let response = Payment {
-        //     uuid: inserted.get_uuid().to_owned(),
-        //     payment_method: inserted.get_payment_method().to_owned(),
-        //     pay_date: inserted.get_pay_date().to_owned(),
-        //     user_id: user.get_uuid().to_owned(),
-        //     order_id: order.get_uuid().to_owned(),
-        //     amount: inserted.get_amount(),
-        //     transaction_id: inserted.get_transaction_id().to_owned(),
-        //     tendered: inserted.get_tendered(),
-        //     change: inserted.get_change(),
-        //     discount: inserted.get_discount(),
-        //     status: inserted.get_status().to_owned(),
-        //     refunded: inserted.is_refunded(),
-        //     service_charge: inserted.get_service_charge(),
-        // };
 
-        Ok(HttpResponse::Ok().finish())
+        Ok(ResponseWrapper {
+            success: true,
+            response: HttpResponse::Ok().finish(),
+        })
     });
 
     // Handle transaction result
     match result {
         Ok(response) => {
+            if !response.success {
+                return response.response;
+            }
+
             println!("Khalti payment lookup successful");
 
             let created_order_id_clone = created_order_id.clone();
@@ -1014,7 +867,7 @@ pub async fn create_payment(
                 .await;
             });
 
-            response
+            response.response
         }
         Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
             "message": "Oops! Something went wrong"
@@ -1240,6 +1093,171 @@ async fn get_order_details(
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({"message": "Ops! something went wrong"}))),
     }
+}
+
+async fn handle_notification_and_email(
+    purchase_order_id: &String,
+    tran_id: &String,
+    tran_amount: f64,
+    tran_fee: f64,
+    tran_status: &String,
+    pay_method: PaymentMethod,
+    notification_service: &Arc<dyn NotificationService>,
+    company_config: &CompanyConfiguration,
+    email_config: &EmailConfiguration,
+    pool: web::Data<SqliteConnectionPool>,
+) -> Result<(), HttpResponse> {
+    use crate::schema::invoice_items::dsl::*;
+    use crate::schema::invoices::dsl::*;
+    use crate::schema::orders::dsl::*;
+    use crate::schema::payments::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{invoice_items, orders, payments, products};
+
+    let conn = &mut get_conn(&pool);
+
+    let order: OrderResponse = match get_order_details(purchase_order_id, &pool).await {
+        Ok(o) => o,
+        Err(http_response) => return Err(http_response),
+    };
+
+    if order.payment.is_none() {
+        return Err(HttpResponse::NotFound()
+            .status(StatusCode::NOT_FOUND)
+            .json(serde_json::json!({"message": "Payment not found for order."})));
+    }
+
+    // update the payment
+    let payment: PaymentModel = match payments
+        .filter(payments::uuid.eq(&order.payment.unwrap().uuid)) //payment must
+        .select(PaymentModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return Err(HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Payment not found for order."})))
+        }
+        Err(_) => {
+            return Err(HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "ops! something went wrong"})))
+        }
+    };
+
+    let invoice = match invoices
+        .inner_join(orders)
+        .inner_join(payments)
+        .filter(orders::uuid.eq(&order.uuid))
+        .filter(payments::id.eq(payment.get_id()))
+        .select(crate::models::invoice::Invoice::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(inv)) => inv,
+        Ok(None) => {
+            return Err(HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Invoice not found for order."})));
+        }
+        Err(_) => {
+            return Err(HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "ops! something went wrong"})));
+        }
+    };
+
+    let inv_items = match invoice_items
+        .inner_join(products.on(invoice_items::product_id.eq(products::id)))
+        .filter(invoice_items::invoice_id.eq(invoice.get_id()))
+        .select((
+            products::name,
+            invoice_items::quantity,
+            invoice_items::unit_price,
+            products::unit,
+            invoice_items::total,
+        ))
+        .load::<InvoiceItem>(conn)
+    {
+        Ok(items) => items,
+        Err(_) => {
+            return Err(HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+                serde_json::json!({
+                    "message": "Invoice not found"
+                }),
+            ))
+        }
+    };
+
+    let actual_tran_fee: f64 = match pay_method {
+        PaymentMethod::Khalti => tran_fee,
+        PaymentMethod::Esewa => {
+            if tran_fee == 0.0 {
+                (tran_amount - order.amount).max(0.0)
+            } else {
+                tran_fee
+            }
+        }
+        _ => {
+            if tran_fee > 0.0 {
+                tran_fee
+            } else {
+                (tran_amount - order.amount).max(0.0)
+            }
+        }
+    };
+
+    match diesel::update(&payment)
+        .set((
+            payments::transaction_id.eq(tran_id),
+            payments::status.eq(tran_status),
+            payments::service_charge.eq(actual_tran_fee),
+        ))
+        .execute(conn)
+    {
+        Ok(_) => {
+            let order_id_clone = order.uuid.clone();
+
+            let notification_service_clone = Arc::clone(notification_service);
+            let company_config_clone = company_config.clone();
+            let email_config_clone = email_config.clone();
+
+            tokio::spawn(async move {
+                send_order_notification(
+                    &notification_service_clone,
+                    order.uuid.clone(),
+                    payment.get_transaction_id().to_string(),
+                    tran_amount,
+                    pay_method.value().to_string(),
+                )
+                .await;
+            });
+
+            tokio::spawn(async move {
+                send_email_with_invoice(
+                    &email_config_clone,
+                    &company_config_clone,
+                    invoice.get_id(),
+                    invoice.invoice_number(),
+                    order_id_clone,
+                    format!("{} {}", order.user.first_name, order.user.last_name),
+                    order.user.email,
+                    order.delivery_location,
+                    inv_items,
+                )
+                .await;
+            });
+        }
+        Err(_) => {
+            return Err(HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "ops! something went wrong"})))
+        }
+    }
+
+    Err(HttpResponse::Ok().finish())
 }
 
 async fn send_order_notification(

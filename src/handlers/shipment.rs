@@ -1,15 +1,17 @@
-use actix_web::{get, http::StatusCode, web, HttpResponse};
+use actix_web::{get, http::StatusCode, patch, web, HttpResponse, Responder};
 use diesel::prelude::*;
 
 use crate::{
     base_types::shipment_status::ShipmentStatus,
-    contracts::shipment::Shipment,
+    contracts::shipment::{AssingShipment, Shipment},
     db::connection::{get_conn, SqliteConnectionPool},
     middlewares::user_info::UserInfo,
+    models::{shipment::Shipment as ShipmentModel, user::User},
+    utils::uuid_validator,
 };
 
 #[get("")]
-pub async fn get(pool: web::Data<SqliteConnectionPool>, user: UserInfo) -> HttpResponse {
+pub async fn get(pool: web::Data<SqliteConnectionPool>, user: UserInfo) -> impl Responder {
     use crate::schema::{orders, shipments, users};
 
     println!("User id is {}", user.user_id);
@@ -57,5 +59,76 @@ pub async fn get(pool: web::Data<SqliteConnectionPool>, user: UserInfo) -> HttpR
         Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(serde_json::json!({ "message": "Oops! Something went wrong." })),
+    }
+}
+
+#[patch("assign")]
+pub async fn assing_user_to_shipment(
+    payload: web::Data<AssingShipment>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let ship_id = match uuid_validator::validate_uuid(&payload.shipment_id) {
+        Ok(u) => u,
+        Err(res) => return res,
+    };
+
+    let u_id = match uuid_validator::validate_uuid(&payload.user_id) {
+        Ok(u) => u,
+        Err(res) => return res,
+    };
+
+    use crate::schema::shipments::dsl::*;
+    use crate::schema::users::dsl::*;
+    use crate::schema::{shipments, users};
+
+    let conn = &mut get_conn(&pool);
+
+    let user: User = match users
+        .filter(users::uuid.eq(&u_id))
+        .select(User::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "User not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong."}))
+        }
+    };
+
+    let shipment: ShipmentModel = match shipments
+        .filter(shipments::uuid.eq(&ship_id))
+        .filter(shipments::status.eq(ShipmentStatus::Pending.value()))
+        .select(ShipmentModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(s)) => s,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Shipment not found"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong."}))
+        }
+    };
+
+    match diesel::update(&shipment)
+        .set(shipments::assigned_to.eq(user.get_id()))
+        .execute(conn)
+    {
+        Ok(_) => HttpResponse::Ok().status(StatusCode::OK).finish(),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong."})),
     }
 }
