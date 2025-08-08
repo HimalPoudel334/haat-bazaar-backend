@@ -460,7 +460,7 @@ pub async fn reset_password(
             <p>If you didn't request this password reset, please ignore this email.</p>
             <p><strong>Do not share this code with anyone.</strong></p>
             "#,
-            user_fullname, otp_expiry_minutes, otp_record.otp_code
+            user_fullname, otp_record.otp_code, otp_expiry_minutes
         );
 
         if let Err(e) = email_service
