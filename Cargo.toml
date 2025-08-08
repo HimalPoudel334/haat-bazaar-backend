@@ -33,6 +33,7 @@ tokio = "1.46.1"
 async-trait = "0.1.88"
 genpdf = "0.2.0"
 lettre = { version = "0.11.18", features = ["tokio1-native-tls", "smtp-transport", "builder"] }
+rand = "0.9.2"
 
 
 [profile.release]

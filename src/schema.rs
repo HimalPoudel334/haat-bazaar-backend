@@ -94,6 +94,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    password_reset_otps (id) {
+        id -> Integer,
+        user_id -> Integer,
+        otp_code -> Text,
+        expires_at -> Text,
+        is_used -> Bool,
+        attempts -> Integer,
+        created_at -> Text,
+    }
+}
+
+diesel::table! {
     payments (id) {
         id -> Integer,
         uuid -> Text,
@@ -189,6 +201,7 @@ diesel::joinable!(invoices -> users (user_id));
 diesel::joinable!(order_items -> orders (order_id));
 diesel::joinable!(order_items -> products (product_id));
 diesel::joinable!(orders -> users (user_id));
+diesel::joinable!(password_reset_otps -> users (user_id));
 diesel::joinable!(payments -> orders (order_id));
 diesel::joinable!(payments -> users (user_id));
 diesel::joinable!(product_images -> products (product_id));
@@ -205,6 +218,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     invoices,
     order_items,
     orders,
+    password_reset_otps,
     payments,
     product_images,
     products,

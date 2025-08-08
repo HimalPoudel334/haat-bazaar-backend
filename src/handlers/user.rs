@@ -255,7 +255,7 @@ pub async fn get_staff_users(pool: web::Data<SqliteConnectionPool>) -> impl Resp
     let conn = &mut get_conn(&pool);
 
     match diesel::sql_query(
-    r#"
+        r#"
     SELECT 
         users.uuid AS user_id,
         users.first_name || ' ' || users.last_name AS full_name,
@@ -268,14 +268,13 @@ pub async fn get_staff_users(pool: web::Data<SqliteConnectionPool>) -> impl Resp
     FROM users
     LEFT JOIN shipments 
       ON shipments.assigned_to = users.id
-      AND shipments.address LIKE '%' || substr(users.location, 1, instr(users.location, ',') - 1) || '%'
-      AND shipments.address LIKE '%' || users.nearest_landmark || '%'
     WHERE users.user_type = ?
     GROUP BY users.uuid, users.first_name, users.last_name, users.location, users.nearest_landmark;
-    "#
+    "#,
     )
     .bind::<diesel::sql_types::Text, _>(UserModel::USERTYPE_DELIVERY)
-    .load::<UserPendingShipments>(conn)    {
+    .load::<UserPendingShipments>(conn)
+    {
         Ok(uv) => HttpResponse::Ok()
             .status(StatusCode::OK)
             .json(serde_json::json!({"users": uv})),

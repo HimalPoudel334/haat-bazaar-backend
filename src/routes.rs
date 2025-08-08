@@ -12,7 +12,8 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/auth")
             .service(auth::login)
-            .service(auth::refresh_token),
+            .service(auth::refresh_token)
+            .service(auth::reset_password),
     )
     .service(
         web::scope("/users")

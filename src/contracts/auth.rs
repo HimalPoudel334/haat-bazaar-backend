@@ -29,3 +29,24 @@ pub struct RefreshTokenResponse {
     pub access_token: String,
     pub refresh_token: String,
 }
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordChangePayload {
+    pub user_id: String,
+    pub current_password: String,
+    pub new_password: String,
+    pub confirm_password: String,
+}
+
+#[derive(Deserialize)]
+pub struct PasswordResetRequest {
+    pub email: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OtpResponse {
+    pub message: String,
+    pub expires_in_minutes: i32,
+}

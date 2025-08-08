@@ -1,11 +1,20 @@
-use actix_web::{delete, HttpRequest};
+use std::sync::Arc;
+
+use actix_web::{delete, put, HttpRequest};
 use actix_web::{http::StatusCode, post, web, HttpResponse, Responder};
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 
-use crate::contracts::auth::{RefreshCredentials, RefreshTokenResponse};
+use crate::base_types::email::Email;
+use crate::contracts::auth::{
+    OtpResponse, PasswordChangePayload, PasswordResetRequest, RefreshCredentials,
+    RefreshTokenResponse,
+};
 use crate::models::refresh_token::{NewRefreshToken, RefreshToken};
+use crate::services::email_service::EmailService;
+use crate::services::opt_service::OtpService;
 use crate::utils::jwt_helper::{create_refresh_token, get_expiration, verify_jwt_with_validation};
+use crate::utils::password_helper::hash_password;
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
@@ -310,6 +319,164 @@ pub async fn refresh_token(
                 .json(serde_json::json!({ "message": format!("Invalid access token: {}", e)}));
         }
     }
+}
+
+#[put("/change-password")]
+pub async fn change_password(
+    payload: web::Json<PasswordChangePayload>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    if payload.new_password != payload.confirm_password {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "New password do not match confirm password"}));
+    }
+
+    use crate::schema::users::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
+    let user: UserModel =
+        match users
+            .filter(uuid.eq(&payload.user_id))
+            .select(UserModel::as_select())
+            .first(conn)
+            .optional()
+        {
+            Ok(Some(u)) => u,
+            Ok(None) => return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(
+                    serde_json::json!({"message": "Invalid user id provided, Couldnot find user"}),
+                ),
+            Err(e) => return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(
+                    serde_json::json!({ "message": format!("Ops! something went wrong: {}", e)}),
+                ),
+        };
+
+    if !verify_password_hash(user.get_password(), &payload.current_password) {
+        return HttpResponse::Unauthorized()
+            .status(StatusCode::UNAUTHORIZED)
+            .json(serde_json::json!({ "message": "Invalid Username or Password" }));
+    }
+
+    let hashed_password = match hash_password(&payload.new_password) {
+        Ok(hp) => hp,
+        Err(e) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({ "message": format!("Ops! something went wrong: {}", e)}))
+        }
+    };
+
+    match diesel::update(&user)
+        .set(password.eq(hashed_password))
+        .execute(conn)
+    {
+        Ok(_) => HttpResponse::Ok().finish(),
+        Err(e) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({ "message": format!("Ops! something went wrong: {}", e)})),
+    }
+}
+
+#[post("/reset-password")]
+pub async fn reset_password(
+    payload: web::Json<PasswordResetRequest>,
+    pool: web::Data<SqliteConnectionPool>,
+    email_service: web::Data<Arc<dyn EmailService>>,
+) -> impl Responder {
+    let email_type = match Email::from_str(payload.email.clone()) {
+        Ok(e) => e,
+        Err(s) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": s}))
+        }
+    };
+
+    use crate::schema::users::dsl::*;
+
+    let conn = &mut get_conn(&pool);
+
+    let user = match users
+        .filter(email.eq(&email_type.get_email()))
+        .select(UserModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid user email provided"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong {}"}));
+        }
+    };
+
+    let user_fullname = user.get_fullname().clone();
+    let email_service = email_service.into_inner();
+
+    let otp_service = OtpService::new(&pool);
+    match otp_service.has_valid_otp(user.get_id()) {
+        Ok(true) => {
+            return HttpResponse::TooManyRequests()
+                .json("An OTP has already been sent. Please wait before requesting a new one.");
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError().json("Database error");
+        }
+        _ => {} // Continue
+    }
+
+    let otp_expiry_minutes = 2;
+    tokio::spawn(async move {
+        let otp_record =
+            match otp_service.create_password_reset_otp(user.get_id(), otp_expiry_minutes * 60) {
+                Ok(otp) => otp,
+                Err(e) => {
+                    println!(
+                        "Failed to create OTP for user {}: {:?}",
+                        user.get_email(),
+                        e
+                    );
+                    return;
+                }
+            };
+
+        let email_content = format!(
+            r#"
+            <h2>Password Reset OTP</h2>
+            <p>Hi {},</p>
+            <p>You requested a password reset. Your OTP code is:</p>
+            <h3 style="color: #007bff; font-size: 24px; letter-spacing: 3px;">{}</h3>
+            <p>This code will expire in {} minutes.</p>
+            <p>If you didn't request this password reset, please ignore this email.</p>
+            <p><strong>Do not share this code with anyone.</strong></p>
+            "#,
+            user_fullname, otp_expiry_minutes, otp_record.otp_code
+        );
+
+        if let Err(e) = email_service
+            .send_html_email(user.get_email(), "Password Reset OTP", &email_content, None)
+            .await
+        {
+            println!("Failed to send OTP email to {}: {:?}", user.get_email(), e);
+        } else {
+            println!("OTP email sent successfully to {}", user.get_email());
+        }
+    });
+
+    HttpResponse::Ok().status(StatusCode::OK).json(OtpResponse {
+        message: "OTP sent to your email address. Please check your inbox.".to_string(),
+        expires_in_minutes: otp_expiry_minutes,
+    })
 }
 
 #[delete("/logout")]

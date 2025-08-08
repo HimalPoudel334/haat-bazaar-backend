@@ -9,7 +9,7 @@ use reqwest::Client;
 use crate::{
     db::connection,
     services::{
-        fcm_notification_service::FcmNotificationServiceImpl,
+        email_service::EmailServiceFactory, fcm_notification_service::FcmNotificationServiceImpl,
         notification_service::NotificationService,
     },
 };
@@ -42,11 +42,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let service_account_key_path = &app_config.firebase_service_account_key_path;
     let fcm_client = utils::fcm_client::FcmClient::new(service_account_key_path).await?;
     let fcm_client_arc = Arc::new(fcm_client);
-
     let notification_service_impl =
-        FcmNotificationServiceImpl::new(fcm_client_arc.clone(), db_pool.clone());
-
+        FcmNotificationServiceImpl::new(fcm_client_arc, db_pool.clone());
     let notification_service: Arc<dyn NotificationService> = Arc::new(notification_service_impl);
+
+    //Email service
+    let email_service = EmailServiceFactory::create_gmail_service(&email_config)?;
 
     std::fs::create_dir_all(&app_config.product_extraimages_path)?;
     std::fs::create_dir_all(&app_config.product_thumbnail_path)?;
@@ -59,6 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .app_data(Data::new(app_config.clone()))
             .app_data(Data::new(company_config.clone()))
             .app_data(Data::new(email_config.clone()))
+            .app_data(Data::new(email_service.clone()))
             .app_data(Data::new(db_pool.clone()))
             .app_data(Data::new(client.clone()))
             .app_data(Data::new(notification_service.clone()))

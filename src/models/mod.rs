@@ -5,6 +5,7 @@ pub mod invoice;
 pub mod invoice_item;
 pub mod order;
 pub mod order_item;
+pub mod password_reset_otp;
 pub mod payment;
 pub mod product;
 pub mod product_image;

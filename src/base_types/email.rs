@@ -11,7 +11,7 @@ impl Email {
         if email_regex.is_match(e.as_str()) {
             Ok(Self { email: e })
         } else {
-            Err("Invalid phone number")
+            Err("Invalid email format")
         }
     }
 
