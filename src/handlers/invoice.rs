@@ -286,7 +286,7 @@ pub async fn get_invoice_file(
         }
     };
 
-    let invoice_service = InvoiceService::new(company_config.get_ref());
+    let invoice_service = InvoiceService::new(company_config.get_ref().to_owned());
     let invoice_bytes = match invoice_service
         .generate_invoice_pdf(
             invoice.0,

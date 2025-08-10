@@ -49,10 +49,8 @@ pub struct InvoiceService {
 }
 
 impl InvoiceService {
-    pub fn new(config: &CompanyConfiguration) -> Self {
-        Self {
-            config: config.clone(),
-        }
+    pub fn new(config: CompanyConfiguration) -> Self {
+        Self { config }
     }
 
     pub async fn generate_invoice_pdf(

@@ -107,244 +107,14 @@ pub async fn create(
     company_config: web::Data<CompanyConfiguration>,
     email_service: web::Data<Arc<dyn EmailService>>,
 ) -> impl Responder {
-    use crate::schema::{invoice_items, invoices, shipments};
-    use crate::schema::{
-        orders::dsl as orders_dsl, payments::dsl::*, products::dsl as products_dsl,
-        users::dsl as users_dsl,
-    };
-    use diesel::prelude::*;
-
-    let conn = &mut get_conn(&pool);
-
-    // Parse UUIDs
-    let o_uuid = match Uuid::parse_str(&payment_json.order_id) {
-        Ok(u) => u,
-        Err(_) => {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "message": "Invalid order ID"
-            }))
-        }
-    };
-
-    let c_uuid = match Uuid::parse_str(&payment_json.user_id) {
-        Ok(c) => c,
-        Err(_) => {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "message": "Invalid user ID"
-            }))
-        }
-    };
-
-    // Fetch user
-    let user: UserModel =
-        match users_dsl::users
-            .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
-            .select(UserModel::as_select())
-            .first(conn)
-            .optional()
-        {
-            Ok(Some(u)) => u,
-            Ok(None) => {
-                return HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "User not found"
-                }))
-            }
-            Err(_) => return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(
-                    serde_json::json!({"message": "ops! something went wrong while fetching user"}),
-                ),
-        };
-
-    // Determine payment method and transaction ID
-    let (pay_method, tran_id) = match PaymentMethod::from_str(&payment_json.payment_method) {
-        Ok(PaymentMethod::Cash) => (
-            PaymentMethod::Cash,
-            Some(Uuid::new_v4().to_string().replace("-", "")),
-        ),
-        Ok(method) => (method, payment_json.transaction_id.clone()),
-        Err(e) => {
-            return HttpResponse::BadRequest().json(serde_json::json!({
-                "message": e
-            }))
-        }
-    };
-
-    let tran_id_clone = tran_id.clone().unwrap();
-    let mut created_order_id: String = String::from("");
-    let mut created_inv_id: i32 = 0;
-    let mut created_inv_number: i32 = 0;
-    let mut order_delivery_location: String = String::from("");
-    let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
-
-    // Start DB transaction
-    let result = conn.transaction::<ResponseWrapper, diesel::result::Error, _>(|con| {
-        // Fetch order
-        let order: OrderModel = match orders_dsl::orders
-            .filter(orders_dsl::uuid.eq(&o_uuid.to_string()))
-            .select(OrderModel::as_select())
-            .first(con)
-            .optional()?
-        {
-            Some(o) => o,
-            None => {
-                return Ok(ResponseWrapper {
-                    success: false,
-                    response: HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Order not found"
-                    })),
-                })
-            }
-        };
-
-        // Verify ownership
-        if order.get_user_id() != user.get_id() {
-            return Ok(ResponseWrapper {
-                success: false,
-                response: HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "User do not match"
-                })),
-            });
-        }
-
-        // Verify amount
-        if order.get_total_price() != payment_json.amount {
-            return Ok(ResponseWrapper {
-                success: false,
-                response: HttpResponse::BadRequest().json(serde_json::json!({
-                    "message": "Order total and payment total do not match"
-                })),
-            });
-        }
-
-        created_order_id = order.get_uuid().to_string();
-        order_delivery_location = order.get_delivery_location().to_string();
-        // Update order status
-        diesel::update(&order)
-            .set((
-                orders_dsl::status.eq(OrderStatus::Pending.value()),
-                orders_dsl::delivery_status.eq(DeliveryStatus::Pending.value()),
-            ))
-            .execute(con)?;
-
-        // Create payment
-        let payment_model = NewPaymentModel::new(
-            &pay_method,
-            &tran_id.unwrap().clone(),
-            &user,
-            &order,
-            payment_json.amount,
-            payment_json.tendered,
-            payment_json.status.to_owned(),
-        );
-
-        let inserted: PaymentModel = diesel::insert_into(payments)
-            .values(&payment_model)
-            .get_result::<PaymentModel>(con)?;
-
-        let user_location = user.get_location().unwrap_or_default();
-        let shipment = NewShipment::new(user_location, &order);
-        diesel::insert_into(shipments::table)
-            .values(&shipment)
-            .execute(con)?;
-
-        let nepal_time = chrono::Utc::now()
-            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
-        let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
-
-        let new_inv: NewInvoice = NewInvoice::new(
-            &inv_date,
-            payment_json.amount,
-            0.0,
-            &order,
-            &user,
-            &inserted,
-        );
-
-        let invoice: Invoice = diesel::insert_into(invoices::table)
-            .values(&new_inv)
-            .get_result::<Invoice>(con)?;
-
-        created_inv_id = invoice.get_id();
-        created_inv_number = invoice.invoice_number();
-
-        //extract order_items and create invoice item for each product
-        let order_items = OrderItem::belonging_to(&order)
-            .select(OrderItem::as_select())
-            .load(con)?;
-
-        for item in order_items {
-            let product = products_dsl::products
-                .find(item.get_product_id())
-                .select(Product::as_select())
-                .first(con)?; //might get runtime here but hey who cares
-
-            let inv_item = NewInvoiceItem::new(&product, &invoice, item.get_quantity(), 0.0, 0.0);
-
-            diesel::insert_into(invoice_items::table)
-                .values(&inv_item)
-                .execute(con)?;
-
-            pdf_inv_items.push(InvoiceItem {
-                description: product.get_name().to_string(),
-                quantity: item.get_quantity(),
-                sku: product.get_unit().to_owned(),
-                unit_price: product.get_price(),
-                total: item.get_quantity() * product.get_price(),
-            });
-        }
-
-        Ok(ResponseWrapper {
-            success: true,
-            response: HttpResponse::Ok().finish(),
-        })
-    });
-
-    // Handle transaction result
-    match result {
-        Ok(response) => {
-            if !response.success {
-                return response.response;
-            }
-
-            println!("Khalti payment lookup successful");
-
-            let created_order_id_clone = created_order_id.clone();
-            tokio::spawn(async move {
-                send_order_notification(
-                    notification_service.get_ref().to_owned(),
-                    created_order_id,
-                    tran_id_clone,
-                    payment_json.amount,
-                    payment_json.payment_method.clone(),
-                )
-                .await;
-            });
-
-            let user_email_for_invoice = user.get_email().to_string();
-            let user_fullname_for_invoice = user.get_fullname();
-
-            tokio::spawn(async move {
-                send_email_with_invoice(
-                    email_service.get_ref().to_owned(),
-                    company_config.get_ref().to_owned(),
-                    created_inv_id,
-                    created_inv_number,
-                    created_order_id_clone,
-                    user_fullname_for_invoice,
-                    user_email_for_invoice,
-                    order_delivery_location,
-                    pdf_inv_items,
-                )
-                .await;
-            });
-
-            response.response
-        }
-        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "message": "Oops! Something went wrong"
-        })),
-    }
+    create_payment(
+        payment_json.into_inner(),
+        pool.get_ref(),
+        notification_service.get_ref(),
+        email_service.get_ref(),
+        company_config.get_ref(),
+    )
+    .await
 }
 
 #[get("/{payment_id}")]
@@ -813,9 +583,9 @@ pub async fn khalti_payment_confirmation(
                         khalti_response.fee / 100.0,
                         &khalti_response.status,
                         PaymentMethod::Khalti,
-                        notification_service.get_ref().to_owned(),
-                        email_service.get_ref().to_owned(),
-                        company_config.get_ref().to_owned(),
+                        notification_service.get_ref(),
+                        email_service.get_ref(),
+                        company_config.get_ref(),
                         pool,
                     )
                     .await
@@ -855,6 +625,253 @@ pub async fn khalti_payment_confirmation(
                 "message": format!("Error getting response from Khalti: {}", e)
             }))
         }
+    }
+}
+
+pub async fn create_payment(
+    payment_json: NewPayment,
+    pool: &SqliteConnectionPool,
+    notification_service: &Arc<dyn NotificationService>,
+    email_service: &Arc<dyn EmailService>,
+    company_config: &CompanyConfiguration,
+) -> HttpResponse {
+    use crate::schema::{invoice_items, invoices, shipments};
+    use crate::schema::{
+        orders::dsl as orders_dsl, payments::dsl::*, products::dsl as products_dsl,
+        users::dsl as users_dsl,
+    };
+    use diesel::prelude::*;
+
+    let conn = &mut get_conn(pool);
+
+    // Parse UUIDs
+    let o_uuid = match Uuid::parse_str(&payment_json.order_id) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Invalid order ID"
+            }))
+        }
+    };
+
+    let c_uuid = match Uuid::parse_str(&payment_json.user_id) {
+        Ok(c) => c,
+        Err(_) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": "Invalid user ID"
+            }))
+        }
+    };
+
+    // Fetch user
+    let user: UserModel =
+        match users_dsl::users
+            .filter(users_dsl::uuid.eq(&c_uuid.to_string()))
+            .select(UserModel::as_select())
+            .first(conn)
+            .optional()
+        {
+            Ok(Some(u)) => u,
+            Ok(None) => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "User not found"
+                }))
+            }
+            Err(_) => return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(
+                    serde_json::json!({"message": "ops! something went wrong while fetching user"}),
+                ),
+        };
+
+    // Determine payment method and transaction ID
+    let (pay_method, tran_id) = match PaymentMethod::from_str(&payment_json.payment_method) {
+        Ok(PaymentMethod::Cash) => (
+            PaymentMethod::Cash,
+            Some(Uuid::new_v4().to_string().replace("-", "")),
+        ),
+        Ok(method) => (method, payment_json.transaction_id.clone()),
+        Err(e) => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "message": e
+            }))
+        }
+    };
+
+    let tran_id_clone = tran_id.clone().unwrap();
+    let mut created_order_id: String = String::from("");
+    let mut created_inv_id: i32 = 0;
+    let mut created_inv_number: i32 = 0;
+    let mut order_delivery_location: String = String::from("");
+    let mut pdf_inv_items: Vec<InvoiceItem> = vec![];
+
+    // Start DB transaction
+    let result = conn.transaction::<ResponseWrapper, diesel::result::Error, _>(|con| {
+        // Fetch order
+        let order: OrderModel = match orders_dsl::orders
+            .filter(orders_dsl::uuid.eq(&o_uuid.to_string()))
+            .select(OrderModel::as_select())
+            .first(con)
+            .optional()?
+        {
+            Some(o) => o,
+            None => {
+                return Ok(ResponseWrapper {
+                    success: false,
+                    response: HttpResponse::BadRequest().json(serde_json::json!({
+                        "message": "Order not found"
+                    })),
+                })
+            }
+        };
+
+        // Verify ownership
+        if order.get_user_id() != user.get_id() {
+            return Ok(ResponseWrapper {
+                success: false,
+                response: HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "User do not match"
+                })),
+            });
+        }
+
+        // Verify amount
+        if order.get_total_price() != payment_json.amount {
+            return Ok(ResponseWrapper {
+                success: false,
+                response: HttpResponse::BadRequest().json(serde_json::json!({
+                    "message": "Order total and payment total do not match"
+                })),
+            });
+        }
+
+        created_order_id = order.get_uuid().to_string();
+        order_delivery_location = order.get_delivery_location().to_string();
+        // Update order status
+        diesel::update(&order)
+            .set((
+                orders_dsl::status.eq(OrderStatus::Pending.value()),
+                orders_dsl::delivery_status.eq(DeliveryStatus::Pending.value()),
+            ))
+            .execute(con)?;
+
+        // Create payment
+        let payment_model = NewPaymentModel::new(
+            &pay_method,
+            &tran_id.unwrap().clone(),
+            &user,
+            &order,
+            payment_json.amount,
+            payment_json.tendered,
+            payment_json.status.to_owned(),
+        );
+
+        let inserted: PaymentModel = diesel::insert_into(payments)
+            .values(&payment_model)
+            .get_result::<PaymentModel>(con)?;
+
+        let user_location = user.get_location().unwrap_or_default();
+        let shipment = NewShipment::new(user_location, &order);
+        diesel::insert_into(shipments::table)
+            .values(&shipment)
+            .execute(con)?;
+
+        let nepal_time = chrono::Utc::now()
+            .with_timezone(&chrono::FixedOffset::east_opt(5 * 3600 + 45 * 60).unwrap());
+        let inv_date = nepal_time.format("%Y-%m-%d %H:%M:%S").to_string();
+
+        let new_inv: NewInvoice = NewInvoice::new(
+            &inv_date,
+            payment_json.amount,
+            0.0,
+            &order,
+            &user,
+            &inserted,
+        );
+
+        let invoice: Invoice = diesel::insert_into(invoices::table)
+            .values(&new_inv)
+            .get_result::<Invoice>(con)?;
+
+        created_inv_id = invoice.get_id();
+        created_inv_number = invoice.invoice_number();
+
+        //extract order_items and create invoice item for each product
+        let order_items = OrderItem::belonging_to(&order)
+            .select(OrderItem::as_select())
+            .load(con)?;
+
+        for item in order_items {
+            let product = products_dsl::products
+                .find(item.get_product_id())
+                .select(Product::as_select())
+                .first(con)?; //might get runtime here but hey who cares
+
+            let inv_item = NewInvoiceItem::new(&product, &invoice, item.get_quantity(), 0.0, 0.0);
+
+            diesel::insert_into(invoice_items::table)
+                .values(&inv_item)
+                .execute(con)?;
+
+            pdf_inv_items.push(InvoiceItem {
+                description: product.get_name().to_string(),
+                quantity: item.get_quantity(),
+                sku: product.get_unit().to_owned(),
+                unit_price: product.get_price(),
+                total: item.get_quantity() * product.get_price(),
+            });
+        }
+
+        Ok(ResponseWrapper {
+            success: true,
+            response: HttpResponse::Ok().finish(),
+        })
+    });
+
+    // Handle transaction result
+    match result {
+        Ok(response) => {
+            if !response.success {
+                return response.response;
+            }
+
+            println!("Khalti payment lookup successful");
+
+            let created_order_id_clone = created_order_id.clone();
+            tokio::spawn(async move {
+                send_order_notification(
+                    notification_service.to_owned(),
+                    created_order_id,
+                    tran_id_clone,
+                    payment_json.amount,
+                    payment_json.payment_method.clone(),
+                )
+                .await;
+            });
+
+            let user_email_for_invoice = user.get_email().to_string();
+            let user_fullname_for_invoice = user.get_fullname();
+
+            tokio::spawn(async move {
+                send_email_with_invoice(
+                    &email_service,
+                    company_config,
+                    created_inv_id,
+                    created_inv_number,
+                    created_order_id_clone,
+                    user_fullname_for_invoice,
+                    user_email_for_invoice,
+                    order_delivery_location,
+                    pdf_inv_items,
+                )
+                .await;
+            });
+
+            response.response
+        }
+        Err(_) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": "Oops! Something went wrong"
+        })),
     }
 }
 
