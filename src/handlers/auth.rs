@@ -8,17 +8,17 @@ use diesel::prelude::*;
 use crate::base_types::email::Email;
 use crate::contracts::auth::{
     OtpResponse, PasswordChangePayload, PasswordResetRequest, RefreshCredentials,
-    RefreshTokenResponse,
+    RefreshTokenResponse, ResetPasswordRequest,
 };
 use crate::models::refresh_token::{NewRefreshToken, RefreshToken};
 use crate::services::email_service::EmailService;
-use crate::services::opt_service::OtpService;
+use crate::services::opt_service::{OtpError, OtpService};
 use crate::utils::jwt_helper::{create_refresh_token, get_expiration, verify_jwt_with_validation};
 use crate::utils::password_helper::hash_password;
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
-        auth::{LoginCredentials, LoginResponse},
+        auth::{LoginCredentials, LoginResponse, VerifyOtpRequest},
         user::User,
     },
     db::connection::{get_conn, SqliteConnectionPool},
@@ -382,27 +382,24 @@ pub async fn change_password(
     }
 }
 
-#[post("/reset-password")]
-pub async fn reset_password(
+#[post("/password-reset/request")]
+pub async fn reset_password_request(
     payload: web::Json<PasswordResetRequest>,
     pool: web::Data<SqliteConnectionPool>,
     email_service: web::Data<Arc<dyn EmailService>>,
 ) -> impl Responder {
-    let email_type = match Email::from_str(payload.email.clone()) {
-        Ok(e) => e,
-        Err(s) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": s}))
-        }
-    };
+    if let Err(e) = Email::from_str(&payload.email) {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": e}));
+    }
 
     use crate::schema::users::dsl::*;
 
     let conn = &mut get_conn(&pool);
 
     let user = match users
-        .filter(email.eq(&email_type.get_email()))
+        .filter(email.eq(&payload.email))
         .select(UserModel::as_select())
         .first(conn)
         .optional()
@@ -477,6 +474,118 @@ pub async fn reset_password(
         message: "OTP sent to your email address. Please check your inbox.".to_string(),
         expires_in_minutes: otp_expiry_minutes,
     })
+}
+
+#[post("/password-reset/verify-otp")]
+pub async fn verify_otp(
+    verify_req: web::Json<VerifyOtpRequest>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    if let Err(e) = Email::from_str(&verify_req.email) {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": e}));
+    }
+
+    if verify_req.otp_code.len() != 6 {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Invalid otp"}));
+    }
+
+    let otp_service = OtpService::new(pool.get_ref());
+
+    let user = match otp_service.find_user_by_email(&verify_req.email) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid email provided"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong."}))
+        }
+    };
+
+    match otp_service.verify_otp(user.get_id(), &verify_req.otp_code) {
+        Ok(true) => HttpResponse::Ok().json(serde_json::json!({
+            "message": "OTP verified successfully. You can now reset your password.",
+            "valid": true
+        })),
+        Ok(false) => HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "Invalid OTP. Please try again.",
+            "valid": false
+        })),
+        Err(OtpError::AttemptsExceeded) => HttpResponse::BadRequest().json(serde_json::json!({
+            "message": "Too many attempts. Please request a new OTP.",
+            "valid": false
+        })),
+        Err(_) => HttpResponse::InternalServerError().json("OTP verification failed"),
+    };
+
+    HttpResponse::Ok().finish()
+}
+
+#[post("/password-reset/confirm")]
+pub async fn reset_password(
+    pool: web::Data<SqliteConnectionPool>,
+    req: web::Json<ResetPasswordRequest>,
+) -> impl Responder {
+    if req.new_password.len() < 8 {
+        return HttpResponse::BadRequest().json("Password must be at least 8 characters long");
+    }
+
+    let otp_service = OtpService::new(pool.get_ref());
+
+    let user = match otp_service.find_user_by_email(&req.email) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid email provided"}))
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}))
+        }
+    };
+
+    match otp_service.verify_otp(user.get_id(), &req.otp_code) {
+        Ok(true) => {
+            let new_password_hash = match hash_password(&req.new_password) {
+                Ok(hash) => hash,
+                Err(_) => {
+                    return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({"message": "Ops! password hashing failed"}))
+                }
+            };
+
+            match otp_service.update_user_password(user.get_id(), &new_password_hash) {
+                Ok(_) => {
+                    HttpResponse::Ok().json(serde_json::json!({
+                        "message": "Password reset successfully. You can now log in with your new password."
+                    }))
+                }
+                Err(_) => {
+                    return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({"message": "Ops! something went wrong while updating password"}))
+                }
+            }
+        }
+        Ok(false) => HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Invalid otp provided"})),
+        Err(OtpError::AttemptsExceeded) => HttpResponse::BadRequest()
+            .json(serde_json::json!({"message": "Too many attempts. Please request a new OTP."})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Otp verification failed"})),
+    }
 }
 
 #[delete("/logout")]
