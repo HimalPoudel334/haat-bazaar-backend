@@ -63,14 +63,11 @@ pub async fn create(
         }));
     }
 
-    let valid_email: Email = match Email::from_str(user.email.to_owned()) {
-        Ok(em) => em,
-        Err(er) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": er}));
-        }
-    };
+    if let Err(e) = Email::from_str(&user.email) {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": e}));
+    }
 
     //get a pooled connection from db
     let conn = &mut get_conn(&pool);
@@ -79,7 +76,7 @@ pub async fn create(
         .filter(
             phone_number
                 .eq(&user.phone_number)
-                .or(email.eq(&valid_email.get_email())),
+                .or(email.eq(&user.email)),
         )
         .select(UserModel::as_select())
         .first(conn)
@@ -93,7 +90,7 @@ pub async fn create(
                 user.first_name.to_owned(),
                 user.last_name.to_owned(),
                 phone_num,
-                valid_email.get_email(),
+                user.email.to_owned(),
                 user.password.to_owned(),
                 user.location.to_owned(),
                 user.nearest_landmark.to_owned(),
@@ -217,14 +214,11 @@ pub async fn get_user_from_email(
 ) -> impl Responder {
     let email_str: String = email_str.into_inner().0;
     //check if the user_id is valid uuid or not before trip to db
-    let valid_email: Email = match Email::from_str(email_str) {
-        Ok(p) => p,
-        Err(e) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}));
-        }
-    };
+    if let Err(e) = Email::from_str(&email_str) {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": e}));
+    }
 
     use crate::schema::users;
     use crate::schema::users::dsl::*;
@@ -233,7 +227,7 @@ pub async fn get_user_from_email(
     let conn = &mut get_conn(&pool);
 
     match users
-        .filter(users::email.eq(&valid_email.get_email()))
+        .filter(users::email.eq(&email_str))
         .select(User::as_select())
         .first(conn)
         .optional()
@@ -363,18 +357,26 @@ pub async fn edit(
         }
     };
 
+    let mut nearest_landmark_value = user.get_nearest_landmark().clone();
+
+    if let Some(ref new_landmark) = user_update.nearest_landmark {
+        nearest_landmark_value = Some(new_landmark);
+    }
+
     match diesel::update(&user)
         .set((
             first_name.eq(&user_update.first_name),
             last_name.eq(&user_update.last_name),
             phone_number.eq(&user_update.phone_number),
+            location.eq(&user_update.location),
+            nearest_landmark.eq(nearest_landmark_value),
         ))
         .execute(conn)
     {
-        Ok(_) => HttpResponse::Ok().status(StatusCode::OK).json(user_update),
-        Err(e) => HttpResponse::InternalServerError()
-            .status(StatusCode::INTERNAL_SERVER_ERROR)
-            .json(serde_json::json!({"message": format!("Internal server error: {}", e)})),
+        Ok(_) => HttpResponse::Ok().json(user_update),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "message": format!("Internal server error: {}", e)
+        })),
     }
 }
 

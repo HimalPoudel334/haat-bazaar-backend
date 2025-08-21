@@ -50,3 +50,16 @@ pub struct OtpResponse {
     pub message: String,
     pub expires_in_minutes: i32,
 }
+
+#[derive(Deserialize)]
+pub struct VerifyOtpRequest {
+    pub email: String,
+    pub otp_code: String,
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordRequest {
+    pub email: String,
+    pub otp_code: String,
+    pub new_password: String,
+}

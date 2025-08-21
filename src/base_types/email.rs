@@ -5,11 +5,11 @@ pub struct Email {
 }
 
 impl Email {
-    pub fn from_str(e: String) -> Result<Self, &'static str> {
+    pub fn from_str(e: &String) -> Result<(), &'static str> {
         const EMAIL_REGEX: &str = r"^[^\s@]+@[^\s@]+\.[^\s@]+$";
         let email_regex = Regex::new(EMAIL_REGEX).unwrap();
         if email_regex.is_match(e.as_str()) {
-            Ok(Self { email: e })
+            Ok(())
         } else {
             Err("Invalid email format")
         }

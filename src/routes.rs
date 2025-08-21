@@ -13,6 +13,8 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/auth")
             .service(auth::login)
             .service(auth::refresh_token)
+            .service(auth::reset_password_request)
+            .service(auth::verify_otp)
             .service(auth::reset_password),
     )
     .service(
