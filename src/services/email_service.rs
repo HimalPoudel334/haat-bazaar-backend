@@ -3,10 +3,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use super::{
-    invoice_service::{Invoice, InvoiceItem},
-    lettre_email_service::LettreEmailService,
-};
+use super::{invoice_service::Invoice, lettre_email_service::LettreEmailService};
 use crate::config::EmailConfiguration;
 
 #[async_trait]

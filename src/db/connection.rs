@@ -23,6 +23,5 @@ pub fn get_conn(pool: &SqliteConnectionPool) -> PooledSqliteConnection {
 pub fn get_db_connection_from_pool(
     pool: &SqliteConnectionPool,
 ) -> Result<PooledSqliteConnection, PoolError> {
-    let result = pool.get().unwrap();
-    Ok(result)
+    pool.get()
 }

@@ -250,7 +250,7 @@ pub async fn edit(
 
         let relative_path = product.get_image().trim_start_matches('/');
 
-        let full_path = Path::new(cwd).join(&relative_path);
+        let full_path = Path::new(cwd).join(relative_path);
         println!("Attempting to save to: {:?}", full_path);
         if let Err(err) = new_thumbnail.file.persist(&full_path) {
             eprintln!("Failed to persist image: {:?}", err);
@@ -308,7 +308,7 @@ pub async fn update_product_category(
         }
     };
 
-    let _cat_uuid: Uuid = match Uuid::parse_str(&category_update.uuid.as_str()) {
+    let _cat_uuid: Uuid = match Uuid::parse_str(category_update.uuid.as_str()) {
         Ok(cu) => cu,
         Err(_) => {
             return HttpResponse::BadRequest()
@@ -462,7 +462,7 @@ pub async fn upload_product_images(
             .execute(conn)
         {
             Ok(urc) => {
-                if urc <= 0 {
+                if urc == 0 {
                     return HttpResponse::InternalServerError().status(StatusCode::INTERNAL_SERVER_ERROR).json(serde_json::json!({"message": "ops! something went wrong while updating product thumbnail"}));
                 }
             },
@@ -478,7 +478,7 @@ pub async fn upload_product_images(
         let path = format!(
             "{}image_{}_extra.png",
             app_config.product_extraimages_path,
-            Uuid::new_v4().to_string()
+            Uuid::new_v4()
         );
 
         //might throw runtime exeception

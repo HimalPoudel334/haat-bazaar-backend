@@ -6,7 +6,7 @@ use crate::contracts::cart::{Cart, NewCart, UpdateCartQuantity};
 use crate::models::cart::{Cart as CartModel, NewCartItem};
 use crate::{
     db::connection::{get_conn, SqliteConnectionPool},
-    models::{user::User as UserModel, product::Product as ProductModel},
+    models::{product::Product as ProductModel, user::User as UserModel},
 };
 
 #[get("/{cust_id}")]
@@ -30,9 +30,9 @@ pub async fn get(
     //maybe not needed
 
     use crate::schema::carts::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{carts, users, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{carts, products, users};
 
     let customer: UserModel = match users
         .filter(users::uuid.eq(&cust_id.to_string()))
@@ -117,9 +117,9 @@ pub async fn create(
     //maybe not needed
 
     use crate::schema::carts::dsl::*;
-    use crate::schema::users::dsl::*;
     use crate::schema::products::dsl::*;
-    use crate::schema::{users, products};
+    use crate::schema::users::dsl::*;
+    use crate::schema::{products, users};
 
     let conn = &mut get_conn(&pool);
 
@@ -291,11 +291,9 @@ pub async fn update_quantity(
             };
             HttpResponse::Ok().status(StatusCode::OK).json(cart_vm)
         }
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}))
-        }
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
 

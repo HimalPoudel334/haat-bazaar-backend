@@ -52,7 +52,7 @@ pub async fn register_fcm_token(
         .execute(conn)
     {
         Ok(_) => HttpResponse::Ok().finish(),
-        Err(_) => return HttpResponse::InternalServerError()
+        Err(_) => HttpResponse::InternalServerError()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .json(
                 serde_json::json!({"message": "Ops! something went wrong. Please try again later"}),

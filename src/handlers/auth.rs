@@ -114,9 +114,10 @@ pub async fn login(
     match existing_token {
         Ok(Some(_)) => {
             // Update existing token
-            if let Err(_) = diesel::update(refresh_tokens.filter(user_id.eq(login_user.get_id())))
+            if diesel::update(refresh_tokens.filter(user_id.eq(login_user.get_id())))
                 .set((token.eq(&rt), expires_on.eq(expiration.1)))
                 .execute(conn)
+                .is_err()
             {
                 return HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -128,9 +129,10 @@ pub async fn login(
         Ok(None) => {
             // Insert new token
             let rt_new = NewRefreshToken::new(&login_user, rt.clone(), &expiration.1);
-            if let Err(_) = diesel::insert_into(refresh_tokens)
+            if diesel::insert_into(refresh_tokens)
                 .values(&rt_new)
                 .execute(conn)
+                .is_err()
             {
                 return HttpResponse::InternalServerError()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -245,7 +247,7 @@ pub async fn refresh_token(
             let ref_tok_expiry =
                 NaiveDateTime::parse_from_str(ref_tok.get_expires_on(), "%Y-%m-%d %H:%M:%S");
 
-            if let Err(_) = ref_tok_expiry {
+            if ref_tok_expiry.is_err() {
                 return HttpResponse::Unauthorized()
                     .status(StatusCode::UNAUTHORIZED)
                     .json(serde_json::json!({"message": "Invalid refresh token provided, refresh token expiration parsing failed"}));
@@ -313,11 +315,9 @@ pub async fn refresh_token(
                     ),
             }
         }
-        Err(e) => {
-            return HttpResponse::Unauthorized()
-                .status(StatusCode::UNAUTHORIZED)
-                .json(serde_json::json!({ "message": format!("Invalid access token: {}", e)}));
-        }
+        Err(e) => HttpResponse::Unauthorized()
+            .status(StatusCode::UNAUTHORIZED)
+            .json(serde_json::json!({ "message": format!("Invalid access token: {}", e)})),
     }
 }
 
@@ -484,8 +484,7 @@ pub async fn logout(req: HttpRequest) -> impl Responder {
     // Extract the token from the Authorization header
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str.starts_with("Bearer ") {
-                let _token = &auth_str[7..];
+            if let Some(_token) = auth_str.strip_prefix("Bearer ") {
                 return HttpResponse::Ok()
                     .status(StatusCode::OK)
                     .json(serde_json::json!({"message": "Logged out successfully"}));

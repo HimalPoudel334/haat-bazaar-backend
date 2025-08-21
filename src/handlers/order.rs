@@ -1243,7 +1243,7 @@ pub async fn update_order_status(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Order not found"        }))
+                .json(serde_json::json!({"message": "Order not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -1318,7 +1318,7 @@ pub async fn update_delivery_status(
         Ok(None) => {
             return HttpResponse::NotFound()
                 .status(StatusCode::NOT_FOUND)
-                .json(serde_json::json!({"message": "Order not found"        }))
+                .json(serde_json::json!({"message": "Order not found"}))
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
