@@ -8,7 +8,7 @@ use diesel::prelude::*;
 use crate::base_types::email::Email;
 use crate::contracts::auth::{
     OtpResponse, PasswordChangePayload, PasswordResetRequest, RefreshCredentials,
-    RefreshTokenResponse, ResetPasswordRequest,
+    RefreshTokenResponse, ResetPasswordRequest, VerifyOtpResponse,
 };
 use crate::models::refresh_token::{NewRefreshToken, RefreshToken};
 use crate::services::email_service::EmailService;
@@ -32,7 +32,6 @@ pub async fn login(
     pool: web::Data<SqliteConnectionPool>,
     app_config: web::Data<ApplicationConfiguration>,
 ) -> impl Responder {
-    println!("Login hit");
     use crate::schema::refresh_tokens::dsl::*;
     use crate::schema::users::dsl::*;
 
@@ -408,7 +407,7 @@ pub async fn reset_password_request(
         Ok(None) => {
             return HttpResponse::BadRequest()
                 .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": "Invalid user email provided"}));
+                .json(serde_json::json!({"message": "The provided email does not exist in our records"}));
         }
         Err(_) => {
             return HttpResponse::InternalServerError()
@@ -510,25 +509,24 @@ pub async fn verify_otp(
     };
 
     match otp_service.verify_otp(user.get_id(), &verify_req.otp_code) {
-        Ok(true) => HttpResponse::Ok().json(serde_json::json!({
-            "message": "OTP verified successfully. You can now reset your password.",
-            "valid": true
-        })),
-        Ok(false) => HttpResponse::BadRequest().json(serde_json::json!({
-            "message": "Invalid OTP. Please try again.",
-            "valid": false
-        })),
-        Err(OtpError::AttemptsExceeded) => HttpResponse::BadRequest().json(serde_json::json!({
-            "message": "Too many attempts. Please request a new OTP.",
-            "valid": false
-        })),
-        Err(_) => HttpResponse::InternalServerError().json("OTP verification failed"),
-    };
-
-    HttpResponse::Ok().finish()
+        Ok(true) => HttpResponse::Ok().json(VerifyOtpResponse {
+            message: "OTP verified successfully. You can now reset your password.".to_string(),
+            is_valid: true,
+        }),
+        Ok(false) => HttpResponse::BadRequest().json(VerifyOtpResponse {
+            message: "Invalid OTP. Please try again.".to_string(),
+            is_valid: false,
+        }),
+        Err(OtpError::AttemptsExceeded) => HttpResponse::BadRequest().json(VerifyOtpResponse {
+            message: "Too many attempts. Please request a new OTP.".to_string(),
+            is_valid: false,
+        }),
+        Err(_) => HttpResponse::BadRequest()
+            .json(serde_json::json!({"message": "OTP verification failed"})),
+    }
 }
 
-#[post("/password-reset/confirm")]
+#[post("/password-reset/new-password")]
 pub async fn reset_password(
     pool: web::Data<SqliteConnectionPool>,
     req: web::Json<ResetPasswordRequest>,
@@ -555,6 +553,15 @@ pub async fn reset_password(
 
     match otp_service.verify_otp(user.get_id(), &req.otp_code) {
         Ok(true) => {
+            match otp_service.mark_otp_as_used(user.get_id(), &req.otp_code) {
+                Ok(_) => (),
+                Err(_) => {
+                    return HttpResponse::InternalServerError()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .json(serde_json::json!({"message": "Ops! something went wrong while updating password"}))
+                }
+            };
+
             let new_password_hash = match hash_password(&req.new_password) {
                 Ok(hash) => hash,
                 Err(_) => {
@@ -571,7 +578,7 @@ pub async fn reset_password(
                     }))
                 }
                 Err(_) => {
-                    return HttpResponse::InternalServerError()
+                    HttpResponse::InternalServerError()
                         .status(StatusCode::INTERNAL_SERVER_ERROR)
                         .json(serde_json::json!({"message": "Ops! something went wrong while updating password"}))
                 }
@@ -590,7 +597,6 @@ pub async fn reset_password(
 
 #[delete("/logout")]
 pub async fn logout(req: HttpRequest) -> impl Responder {
-    // Extract the token from the Authorization header
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             if let Some(_token) = auth_str.strip_prefix("Bearer ") {

@@ -36,13 +36,11 @@ impl OtpService {
         }
     }
 
-    // Generate 6-digit OTP
     fn generate_otp() -> String {
         let mut rng = rand::rng();
         format!("{:06}", rng.random_range(100000..999999))
     }
 
-    // Find user by email
     pub fn find_user_by_email(&self, email: &str) -> Result<Option<User>, diesel::result::Error> {
         use crate::schema::users;
 
@@ -55,7 +53,6 @@ impl OtpService {
             .optional()
     }
 
-    // Create OTP for password reset
     pub fn create_password_reset_otp(
         &self,
         user_id: i32,
@@ -66,7 +63,6 @@ impl OtpService {
         let conn = &mut get_conn(&self.pool);
 
         conn.transaction::<_, OtpError, _>(|con| {
-            // Invalidate any existing OTPs for this user
             diesel::update(password_reset_otps::table)
                 .filter(password_reset_otps::user_id.eq(user_id))
                 .filter(password_reset_otps::is_used.eq(false))
@@ -85,14 +81,12 @@ impl OtpService {
         })
     }
 
-    // Verify OTP
     pub fn verify_otp(&self, uid: i32, otp_code_str: &str) -> Result<bool, OtpError> {
         use crate::schema::password_reset_otps;
 
         let conn = &mut get_conn(&self.pool);
 
         conn.transaction::<_, OtpError, _>(|con| {
-            // Get the latest unused OTP for this user
             let otp_record = password_reset_otps::table
                 .filter(password_reset_otps::user_id.eq(uid))
                 .filter(password_reset_otps::is_used.eq(false))
@@ -103,12 +97,10 @@ impl OtpService {
 
             let otp_record = match otp_record {
                 Some(record) => record,
-                None => return Ok(false), // No valid OTP found
+                None => return Ok(false),
             };
 
-            // Check attempt limit (max 3 attempts)
-            if otp_record.attempts >= 3 {
-                // Mark as used to prevent further attempts
+            if otp_record.attempts >= 2 {
                 diesel::update(password_reset_otps::table)
                     .filter(password_reset_otps::id.eq(otp_record.id))
                     .set(password_reset_otps::is_used.eq(true))
@@ -116,19 +108,18 @@ impl OtpService {
                 return Err(OtpError::AttemptsExceeded);
             }
 
-            // Increment attempts
             diesel::update(password_reset_otps::table)
                 .filter(password_reset_otps::id.eq(otp_record.id))
                 .set(password_reset_otps::attempts.eq(otp_record.attempts + 1))
                 .execute(con)?;
 
-            // Verify OTP code
             if otp_record.otp_code == otp_code_str {
-                // Mark as used on successful verification
-                diesel::update(password_reset_otps::table)
-                    .filter(password_reset_otps::id.eq(otp_record.id))
-                    .set(password_reset_otps::is_used.eq(true))
-                    .execute(con)?;
+                //do not mark otp as used for now
+                // diesel::update(password_reset_otps::table)
+                //     .filter(password_reset_otps::id.eq(otp_record.id))
+                //     .set(password_reset_otps::is_used.eq(true))
+                //     .execute(con)?;
+                //
                 return Ok(true);
             }
 
@@ -136,7 +127,26 @@ impl OtpService {
         })
     }
 
-    // Clean up expired OTPs (call this periodically)
+    pub fn mark_otp_as_used(
+        &self,
+        uid: i32,
+        otp_code_str: &str,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::schema::password_reset_otps;
+
+        let conn = &mut get_conn(&self.pool);
+
+        diesel::update(password_reset_otps::table)
+            .filter(password_reset_otps::user_id.eq(uid))
+            .filter(password_reset_otps::expires_at.gt(Utc::now().to_rfc3339()))
+            .filter(password_reset_otps::otp_code.eq(otp_code_str))
+            .filter(password_reset_otps::is_used.eq(false))
+            .set(password_reset_otps::is_used.eq(true))
+            .execute(conn)?;
+
+        Ok(())
+    }
+
     pub fn cleanup_expired_otps(&self) -> Result<usize, diesel::result::Error> {
         use crate::schema::password_reset_otps;
 
@@ -149,7 +159,6 @@ impl OtpService {
         Ok(deleted_count)
     }
 
-    // Check if user has valid OTP (for rate limiting)
     pub fn has_valid_otp(&self, user_id: i32) -> Result<bool, diesel::result::Error> {
         use crate::schema::password_reset_otps;
 
@@ -165,7 +174,6 @@ impl OtpService {
         Ok(count > 0)
     }
 
-    // Update user password
     pub fn update_user_password(
         &self,
         user_id: i32,
@@ -176,13 +184,11 @@ impl OtpService {
         let conn = &mut get_conn(&self.pool);
 
         conn.transaction::<_, diesel::result::Error, _>(|conn| {
-            // Update password
             diesel::update(users::table)
                 .filter(users::id.eq(user_id))
                 .set(users::password.eq(new_password_hash))
                 .execute(conn)?;
 
-            // Invalidate all existing OTPs for this user
             diesel::update(password_reset_otps::table)
                 .filter(password_reset_otps::user_id.eq(user_id))
                 .set(password_reset_otps::is_used.eq(true))

@@ -52,12 +52,21 @@ pub struct OtpResponse {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct VerifyOtpRequest {
     pub email: String,
     pub otp_code: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyOtpResponse {
+    pub message: String,
+    pub is_valid: bool,
+}
+
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResetPasswordRequest {
     pub email: String,
     pub otp_code: String,

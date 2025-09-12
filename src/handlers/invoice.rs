@@ -132,9 +132,9 @@ pub async fn create(
     {
         Ok(inv) => {
             if inv_json.invoice_items.is_empty() {
-                return HttpResponse::BadRequest()
+                HttpResponse::BadRequest()
                     .status(StatusCode::BAD_REQUEST)
-                    .json(serde_json::json!({"message": "Error! no invoice items provided"}));
+                    .json(serde_json::json!({"message": "Error! no invoice items provided"}))
             } else {
                 for inv_item in &inv_json.invoice_items {
                     let prod: ProductModel = match products

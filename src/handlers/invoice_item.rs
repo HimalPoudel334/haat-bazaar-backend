@@ -1,4 +1,4 @@
-use actix_web::{http::StatusCode, web, HttpResponse, Responder};
+use actix_web::{http::StatusCode, post, web, HttpResponse, Responder};
 use diesel::prelude::*;
 use uuid::Uuid;
 
@@ -11,7 +11,8 @@ use crate::{
     },
 };
 
-pub fn add(
+#[post("")]
+pub async fn add(
     inv_id: web::Path<(String,)>,
     inv_item: web::Json<NewInvoiceItem>,
     pool: web::Data<SqliteConnectionPool>,

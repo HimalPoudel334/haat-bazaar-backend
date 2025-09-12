@@ -296,13 +296,10 @@ pub async fn edit(
     };
 
     //check if the phone number is valid or not
-    let _ = match PhoneNumber::from_str(user_update.phone_number.to_owned()) {
-        Ok(_) => (),
-        Err(e) => {
-            return HttpResponse::BadRequest()
-                .status(StatusCode::BAD_REQUEST)
-                .json(serde_json::json!({"message": e}));
-        }
+    if let Err(e) = PhoneNumber::from_str(user_update.phone_number.to_owned()) {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": e}));
     };
 
     use crate::schema::users::dsl::*;
@@ -317,10 +314,7 @@ pub async fn edit(
         .first(conn)
         .optional()
     {
-        Ok(cu) => match cu {
-            Some(c) => c,
-            None => Default::default(), //return the default User struct if not found
-        },
+        Ok(cu) => cu.unwrap_or_default(),
         Err(e) => {
             return HttpResponse::InternalServerError()
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
@@ -357,7 +351,7 @@ pub async fn edit(
         }
     };
 
-    let mut nearest_landmark_value = user.get_nearest_landmark().clone();
+    let mut nearest_landmark_value = user.get_nearest_landmark();
 
     if let Some(ref new_landmark) = user_update.nearest_landmark {
         nearest_landmark_value = Some(new_landmark);

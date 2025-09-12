@@ -2,8 +2,8 @@ use actix_web::web;
 
 use crate::{
     handlers::{
-        admin_device, auth, base_type, cart, category, invoice, order, order_item, payment,
-        product, shipment, user,
+        admin_device, auth, base_type, cart, category, invoice, invoice_item, order, order_item,
+        payment, product, shipment, user,
     },
     middlewares::auth_middleware::Auth,
 };
@@ -78,6 +78,11 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
             .service(invoice::create)
             .service(invoice::get)
             .service(invoice::get_all),
+    )
+    .service(
+        web::scope("/invoice-items")
+            .wrap(Auth::authenticated())
+            .service(invoice_item::add),
     )
     .service(
         web::scope("/base-types")

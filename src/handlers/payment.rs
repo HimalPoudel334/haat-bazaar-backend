@@ -13,7 +13,7 @@ use crate::{
         delivery_status::DeliveryStatus, order_status::OrderStatus, payment_method::PaymentMethod,
         payment_status::PaymentStatus,
     },
-    config::{ApplicationConfiguration, CompanyConfiguration, EmailConfiguration},
+    config::{ApplicationConfiguration, CompanyConfiguration},
     contracts::{
         khalti_payment::{
             AmountBreakdown, KhaltiPaymentCallback, KhaltiPaymentPayload, KhaltiResponse,
@@ -41,7 +41,7 @@ use crate::{
         user::User as UserModel,
     },
     services::{
-        email_service::{self, EmailService},
+        email_service::EmailService,
         invoice_service::{InvoiceItem, InvoiceService},
         notification_service::{NotificationEvent, NotificationService, PaymentReceivedPayload},
     },
@@ -572,6 +572,7 @@ pub async fn esewa_payment_confirmation(
     match verification_result {
         Ok(vr) => {
             let order_id = vr.product_id.clone(); // product_id is actually order id.
+
             match handle_notification_and_email(
                 &order_id,
                 &vr.transaction_details.reference_id,
@@ -697,7 +698,7 @@ pub async fn khalti_payment_get_pidx(
         &app_config.khalti_payment_confirm_callback_url,
         &app_config.khalti_payment_confirm_callback_webiste_url,
         order_details.total_price,
-        order_details.uuid.into(),
+        order_details.uuid,
         format!("{}'s Order", user_info.name),
         user_info,
         Some(vec![
@@ -821,7 +822,7 @@ pub async fn khalti_payment_confirmation(
                     .await
                     {
                         Ok(()) => HttpResponse::Ok().json(serde_json::json!({
-                            "message": "Payment verification successful"
+                            "message": "payment verification successful"
                         })),
                         Err(res) => res,
                     }
@@ -829,22 +830,22 @@ pub async fn khalti_payment_confirmation(
                 Err(er) => {
                     eprintln!("{er}");
                     HttpResponse::InternalServerError().json(serde_json::json!({
-                        "message": format!("Error parsing response from Khalti: {}", er)
+                        "message": format!("error parsing response from khalti: {}", er)
                     }))
                 }
             },
             _ => match res.json::<serde_json::Value>().await {
                 Ok(v) => {
-                    println!("Failed verification: {v}");
+                    println!("failed verification: {v}");
                     HttpResponse::BadRequest().json(serde_json::json!({
-                        "message": "Payment verification failed",
+                        "message": "payment verification failed",
                         "details": v
                     }))
                 }
                 Err(e) => {
                     eprintln!("{e}");
                     HttpResponse::InternalServerError().json(serde_json::json!({
-                        "message": format!("Error parsing error response from Khalti: {}", e)
+                        "message": format!("error parsing error response from khalti: {}", e)
                     }))
                 }
             },
@@ -852,7 +853,7 @@ pub async fn khalti_payment_confirmation(
         Err(e) => {
             eprintln!("{e}");
             HttpResponse::InternalServerError().json(serde_json::json!({
-                "message": format!("Error getting response from Khalti: {}", e)
+                "message": format!("error getting response from khalti: {}", e)
             }))
         }
     }
@@ -874,7 +875,7 @@ async fn get_order_details(
         categories, invoices, order_items, orders, payments, products, shipments, users,
     };
 
-    let conn = &mut get_conn(&pool);
+    let conn = &mut get_conn(pool);
 
     type OrderTuple = (
         String,

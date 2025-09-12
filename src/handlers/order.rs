@@ -558,15 +558,13 @@ pub async fn get_user_orders(
         }
         Err(diesel::result::Error::NotFound) => {
             // This case handles if belong_to returns no orders for the user
-            return HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
+            HttpResponse::NotFound().status(StatusCode::NOT_FOUND).json(
                serde_json::json!({"message": "Order not found. Looks user hasn't ordered anything yet"}),
-            );
+            )
         }
-        Err(_) => {
-            return HttpResponse::InternalServerError()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .json(serde_json::json!({"message": "Ops! something went wrong"}));
-        }
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
     }
 }
 
@@ -799,7 +797,7 @@ pub async fn create(
         }
 
         let order_vm = Order {
-            user_id: format!("{};{}", user_uuid.to_string(), user.get_fullname()),
+            user_id: format!("{};{}", user_uuid, user.get_fullname()),
             created_on: order.get_created_on().to_owned(),
             fulfilled_on: order.get_fulfilled_on().to_owned(),
             total_price: order.get_total_price(),
@@ -1058,7 +1056,7 @@ pub async fn create_orders_from_cart(
                 let new_order_item = NewOrderItemModel::new(
                     cart.get_quantity(),
                     cart.get_discount(),
-                    &product,
+                    product,
                     &inserted_order,
                 );
 
@@ -1072,7 +1070,7 @@ pub async fn create_orders_from_cart(
                     .execute(con)?;
 
                 let inv_item =
-                    NewInvoiceItem::new(&product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
+                    NewInvoiceItem::new(product, &inserted_inv, cart.get_quantity(), 0.0, 0.0);
                 diesel::insert_into(invoice_items::table)
                     .values(&inv_item)
                     .execute(con)?;
