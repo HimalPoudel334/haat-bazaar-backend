@@ -8,6 +8,7 @@ use crate::{
         password_reset_otp::{NewPasswordResetOtp, PasswordResetOtp},
         user::User,
     },
+    utils::password_helper,
 };
 
 #[derive(Debug)]
@@ -36,9 +37,12 @@ impl OtpService {
         }
     }
 
-    fn generate_otp() -> String {
+    fn generate_otp() -> (String, String) {
         let mut rng = rand::rng();
-        format!("{:06}", rng.random_range(100000..999999))
+        let otp = format!("{:06}", rng.random_range(100000..999999));
+        let otp_hash = password_helper::hash_otp(&otp).unwrap();
+
+        (otp, otp_hash)
     }
 
     pub fn find_user_by_email(&self, email: &str) -> Result<Option<User>, diesel::result::Error> {
@@ -71,12 +75,13 @@ impl OtpService {
 
             let otp_code_str = Self::generate_otp();
 
-            let new_otp = NewPasswordResetOtp::new(user_id, otp_code_str, expiry_seconds);
+            let new_otp = NewPasswordResetOtp::new(user_id, otp_code_str.1, expiry_seconds);
 
-            let otp = diesel::insert_into(password_reset_otps::table)
+            let mut otp = diesel::insert_into(password_reset_otps::table)
                 .values(&new_otp)
                 .get_result::<PasswordResetOtp>(con)?;
 
+            otp.otp_code = otp_code_str.0;
             Ok(otp)
         })
     }
@@ -113,13 +118,11 @@ impl OtpService {
                 .set(password_reset_otps::attempts.eq(otp_record.attempts + 1))
                 .execute(con)?;
 
-            if otp_record.otp_code == otp_code_str {
-                //do not mark otp as used for now
-                // diesel::update(password_reset_otps::table)
-                //     .filter(password_reset_otps::id.eq(otp_record.id))
-                //     .set(password_reset_otps::is_used.eq(true))
-                //     .execute(con)?;
-                //
+            if Utc::now().to_rfc3339() > otp_record.expires_at {
+                return Err(OtpError::OtpExpired);
+            }
+
+            if password_helper::verify_otp_hash(&otp_record.otp_code, otp_code_str) {
                 return Ok(true);
             }
 

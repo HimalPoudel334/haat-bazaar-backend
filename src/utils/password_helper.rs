@@ -23,3 +23,11 @@ pub fn verify_password_hash(hashed_password: &str, input_password: &str) -> bool
         Err(_) => false,
     }
 }
+
+pub fn hash_otp(otp: &str) -> Result<String, Error> {
+    hash_password(otp)
+}
+
+pub fn verify_otp_hash(hashed_otp: &str, input_otp: &str) -> bool {
+    verify_password_hash(hashed_otp, input_otp)
+}
