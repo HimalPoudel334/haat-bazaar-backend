@@ -142,3 +142,69 @@ CREATE TABLE IF NOT EXISTS "shipments" (
     FOREIGN KEY (order_id) REFERENCES orders(id),
     FOREIGN KEY (assigned_to) REFERENCES users(id)
 );
+
+
+-- Indexes
+-- UUID Indexes (Critical for lookups by UUID)
+CREATE UNIQUE INDEX idx_categories_uuid ON categories(uuid);
+CREATE UNIQUE INDEX idx_products_uuid ON products(uuid);
+CREATE UNIQUE INDEX idx_users_uuid ON users(uuid);
+CREATE UNIQUE INDEX idx_carts_uuid ON carts(uuid);
+CREATE UNIQUE INDEX idx_payments_uuid ON payments(uuid);
+CREATE UNIQUE INDEX idx_invoices_uuid ON invoices(uuid);
+CREATE UNIQUE INDEX idx_invoice_items_uuid ON invoice_items(uuid);
+CREATE UNIQUE INDEX idx_product_images_uuid ON product_images(uuid);
+CREATE UNIQUE INDEX idx_order_items_uuid ON order_items(uuid);
+CREATE UNIQUE INDEX idx_orders_uuid ON orders(uuid);
+CREATE UNIQUE INDEX idx_shipments_uuid ON shipments(uuid);
+
+-- Foreign Key Indexes (Critical for JOIN performance)
+CREATE INDEX idx_products_category_id ON products(category_id);
+CREATE INDEX idx_carts_product_id ON carts(product_id);
+CREATE INDEX idx_carts_user_id ON carts(user_id);
+CREATE INDEX idx_payments_user_id ON payments(user_id);
+CREATE INDEX idx_payments_order_id ON payments(order_id);
+CREATE INDEX idx_invoices_order_id ON invoices(order_id);
+CREATE INDEX idx_invoices_user_id ON invoices(user_id);
+CREATE INDEX idx_invoices_payment_id ON invoices(payment_id);
+CREATE INDEX idx_invoice_items_product_id ON invoice_items(product_id);
+CREATE INDEX idx_invoice_items_invoice_id ON invoice_items(invoice_id);
+CREATE INDEX idx_product_images_product_id ON product_images(product_id);
+CREATE INDEX idx_order_items_product_id ON order_items(product_id);
+CREATE INDEX idx_order_items_order_id ON order_items(order_id);
+CREATE INDEX idx_orders_user_id ON orders(user_id);
+CREATE INDEX idx_shipments_order_id ON shipments(order_id);
+CREATE INDEX idx_shipments_assigned_to ON shipments(assigned_to);
+
+-- Composite Indexes for Common Query Patterns
+CREATE UNIQUE INDEX idx_carts_user_product ON carts(user_id, product_id); -- Prevent duplicate cart items
+CREATE INDEX idx_orders_user_status ON orders(user_id, status); -- User's orders by status
+CREATE INDEX idx_orders_status_created ON orders(status, created_on); -- Orders by status and date
+CREATE INDEX idx_payments_status_date ON payments(status, pay_date); -- Payments by status and date
+CREATE INDEX idx_shipments_status_date ON shipments(status, ship_date); -- Shipments by status and date
+
+-- Email Index for User Lookups (already unique, but explicit index for performance)
+CREATE INDEX idx_users_email ON users(email);
+
+-- Transaction ID for Payment Lookups
+CREATE INDEX idx_payments_transaction_id ON payments(transaction_id);
+
+-- Invoice Number for Invoice Lookups
+CREATE INDEX idx_invoices_invoice_number ON invoices(invoice_number);
+
+-- Date-based Indexes for Reporting
+CREATE INDEX idx_orders_created_on ON orders(created_on);
+CREATE INDEX idx_orders_fulfilled_on ON orders(fulfilled_on);
+CREATE INDEX idx_payments_pay_date ON payments(pay_date);
+CREATE INDEX idx_invoices_invoice_date ON invoices(invoice_date);
+
+-- Status Indexes for Filtering
+CREATE INDEX idx_orders_status ON orders(status);
+CREATE INDEX idx_orders_delivery_status ON orders(delivery_status);
+CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_shipments_status ON shipments(status);
+
+-- Product Search and Filtering
+CREATE INDEX idx_products_name ON products(name); -- For product name searches
+CREATE INDEX idx_products_price ON products(price); -- For price filtering
+CREATE INDEX idx_products_stock ON products(stock); -- For stock availability

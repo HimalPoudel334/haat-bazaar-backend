@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&app_config.product_thumbnail_path)?;
 
     let server_address = app_config.server_address.clone();
-    let server_port = app_config.server_port.clone();
+    let server_port = app_config.server_port;
 
     HttpServer::new(move || {
         App::new()
@@ -68,12 +68,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .configure(routes::app_routes)
             .service(fs::Files::new("/images", "./images"))
     })
-    .bind((server_address, server_port))
+    .bind((server_address.clone(), server_port))
     .map_err(|e| Box::new(e) as Box<dyn Error>)?
     .run()
     .await?;
 
-    println!("Server started on http://localhost:8080");
+    println!(
+        "Server started on http://{}:{}",
+        server_address, server_port
+    );
 
     Ok(())
 }

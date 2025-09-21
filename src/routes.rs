@@ -29,7 +29,14 @@ pub fn app_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/products")
             .service(product::get)
             .service(product::get_product)
-            .service(product::get_product_images_list),
+            .service(product::get_product_images_list)
+            .service(product::get_product_ratings)
+            .service(
+                web::scope("")
+                    .wrap(Auth::authenticated())
+                    .service(product::get_user_product_rating)
+                    .service(product::rate_product),
+            ),
     )
     .service(
         web::scope("/categories")

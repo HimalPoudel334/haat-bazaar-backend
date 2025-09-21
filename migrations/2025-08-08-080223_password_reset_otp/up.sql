@@ -14,3 +14,7 @@ CREATE TABLE password_reset_otps (
 CREATE INDEX idx_password_reset_otps_user_id ON password_reset_otps(user_id);
 CREATE INDEX idx_password_reset_otps_otp_code ON password_reset_otps(otp_code);
 CREATE INDEX idx_password_reset_otps_expires_at ON password_reset_otps(expires_at);
+CREATE INDEX idx_password_reset_otps_is_used ON password_reset_otps(is_used);
+CREATE INDEX idx_password_reset_otps_created_at ON password_reset_otps(created_at);
+CREATE INDEX idx_password_reset_otps_user_expires ON password_reset_otps(user_id, expires_at);
+CREATE INDEX idx_password_reset_otps_otp_used ON password_reset_otps(otp_code, is_used);

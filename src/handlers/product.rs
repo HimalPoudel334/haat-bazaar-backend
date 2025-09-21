@@ -1,26 +1,29 @@
-use std::env;
-use std::path::Path;
+use std::{env, path::Path};
 
-use ::uuid::Uuid;
-use actix_multipart::form::MultipartForm;
-use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
-use diesel::prelude::*;
-
-use crate::contracts::product::CategoryFilterParams;
-use crate::contracts::product_image::ProductImage;
-use crate::models::product_image::{NewProductImage, ProductImage as ProductImageModel};
 use crate::{
     config::ApplicationConfiguration,
     contracts::{
         category::Category,
-        product::{Product, ProductCreate, ProductStockUpdate, UploadForm},
+        product::{CategoryFilterParams, Product, ProductCreate, ProductStockUpdate, UploadForm},
+        product_image::ProductImage,
+        product_rating::{NewProductRating, ProductRating},
     },
     db::connection::{get_conn, SqliteConnectionPool},
     models::{
         category::Category as CategoryModel,
         product::{NewProduct, Product as ProductModel},
+        product_image::{
+            NewProductImage as NewProductImageModel, ProductImage as ProductImageModel,
+        },
+        product_rating::{
+            NewProductRating as NewProductRatingModel, ProductRating as ProductRatingModel,
+        },
     },
 };
+use ::uuid::Uuid;
+use actix_multipart::form::MultipartForm;
+use actix_web::{delete, get, http::StatusCode, patch, post, put, web, HttpResponse, Responder};
+use diesel::prelude::*;
 
 #[get("")]
 pub async fn get(
@@ -486,7 +489,7 @@ pub async fn upload_product_images(
         //f.file.persist(path).unwrap();
 
         //insert the image name into the db with product id
-        let product_image: NewProductImage = NewProductImage::new(&path, &product);
+        let product_image = NewProductImageModel::new(&path, &product);
         match diesel::insert_into(product_images)
             .values(&product_image)
             .execute(conn)
@@ -567,4 +570,213 @@ pub async fn get_product_images_list(
     HttpResponse::Ok()
         .status(StatusCode::OK)
         .json(serde_json::json!({"productImages": prod_images}))
+}
+
+#[post("/{prod_id}/rate")]
+pub async fn rate_product(
+    prod_id: web::Path<String>,
+    rating_json: web::Json<NewProductRating>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_id: String = prod_id.into_inner();
+    //check if the product_id is valid uuid or not before trip to db
+    match Uuid::parse_str(&prod_id) {
+        Ok(_) => (),
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+    use crate::schema::product_ratings::dsl::*;
+    use crate::schema::products::dsl::*;
+    use crate::schema::{products, users};
+    let conn = &mut get_conn(&pool);
+    if rating_json.rating < 1.0 || rating_json.rating > 5.0 {
+        return HttpResponse::BadRequest()
+            .status(StatusCode::BAD_REQUEST)
+            .json(serde_json::json!({"message": "Rating must be between 1 and 5"}));
+    }
+    //check if the product exists
+    let product = match products
+        .filter(products::uuid.eq(&prod_id))
+        .select(ProductModel::as_select())
+        .first::<ProductModel>(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+    //check if the user exists
+    let user = match users::table
+        .filter(users::uuid.eq(&rating_json.user_id))
+        .select(crate::models::user::User::as_select())
+        .first::<crate::models::user::User>(conn)
+        .optional()
+    {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "User not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    let new_rating = NewProductRatingModel::new(
+        &product,
+        &user,
+        rating_json.rating,
+        rating_json.review.clone(),
+    );
+
+    match diesel::insert_into(product_ratings)
+        .values(&new_rating)
+        .on_conflict((product_id, user_id)) // Composite key conflict
+        .do_update()
+        .set((
+            rating.eq(rating_json.rating),
+            review.eq(&rating_json.review),
+            updated_at.eq(diesel::dsl::now),
+        ))
+        .execute(conn)
+    {
+        Ok(_) => {
+            HttpResponse::Ok().json(serde_json::json!({"message": "Rating saved successfully"}))
+        }
+        Err(_) => HttpResponse::InternalServerError()
+            .json(serde_json::json!({"message": "Ops! something went wrong while saving rating"})),
+    }
+}
+
+#[get("/{prod_id}/ratings")]
+pub async fn get_product_ratings(
+    prod_id: web::Path<String>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let prod_id: String = prod_id.into_inner();
+
+    //check if the product_id is valid uuid or not before trip to db
+    let prod_uuid: Uuid = match Uuid::parse_str(&prod_id) {
+        Ok(u) => u,
+        Err(_) => {
+            return HttpResponse::BadRequest()
+                .status(StatusCode::BAD_REQUEST)
+                .json(serde_json::json!({"message": "Invalid product id"}));
+        }
+    };
+
+    use crate::schema::products::dsl::*;
+    use crate::schema::{product_ratings, products, users};
+
+    //get a pooled connection from db
+    let conn = &mut get_conn(&pool);
+
+    //get the product for the uuid
+    let product: ProductModel = match products
+        .filter(products::uuid.eq(&prod_uuid.to_string()))
+        .select(ProductModel::as_select())
+        .first(conn)
+        .optional()
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .status(StatusCode::NOT_FOUND)
+                .json(serde_json::json!({"message": "Product not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    match ProductRatingModel::belonging_to(&product)
+        .inner_join(users::table)
+        .select((
+            product_ratings::uuid,
+            users::first_name,
+            users::last_name,
+            product_ratings::rating,
+            product_ratings::review,
+            product_ratings::created_at,
+            product_ratings::updated_at,
+        ))
+        .load::<ProductRating>(conn)
+        .optional()
+    {
+        Ok(r) => HttpResponse::Ok()
+            .status(StatusCode::OK)
+            .json(serde_json::json!({"ratings": r})),
+        Err(_) => HttpResponse::InternalServerError()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .json(serde_json::json!({"message": "Ops! something went wrong"})),
+    }
+}
+
+#[get("/{prod_id}/rating/{user_id}")]
+pub async fn get_user_product_rating(
+    path: web::Path<(String, String)>,
+    pool: web::Data<SqliteConnectionPool>,
+) -> impl Responder {
+    let (prod_id, u_id) = path.into_inner();
+
+    // Validate UUIDs
+    if Uuid::parse_str(&prod_id).is_err() {
+        return HttpResponse::BadRequest()
+            .json(serde_json::json!({"message": "Invalid product id"}));
+    }
+    if Uuid::parse_str(&u_id).is_err() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"message": "Invalid user id"}));
+    }
+
+    use crate::schema::product_ratings::dsl::*;
+    use crate::schema::{product_ratings, products, users};
+
+    let conn = &mut get_conn(&pool);
+
+    // Get user's rating for the product
+    let user_rating = match product_ratings
+        .inner_join(products::table.on(products::id.eq(product_id)))
+        .inner_join(users::table.on(users::id.eq(user_id)))
+        .filter(products::uuid.eq(&prod_id))
+        .filter(users::uuid.eq(&u_id))
+        .select((
+            product_ratings::uuid,
+            users::first_name,
+            users::last_name,
+            product_ratings::rating,
+            product_ratings::review,
+            product_ratings::created_at,
+            product_ratings::updated_at,
+        ))
+        .first::<ProductRating>(conn)
+        .optional()
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return HttpResponse::NotFound()
+                .json(serde_json::json!({"message": "Rating not found"}));
+        }
+        Err(_) => {
+            return HttpResponse::InternalServerError()
+                .json(serde_json::json!({"message": "Ops! something went wrong"}));
+        }
+    };
+
+    HttpResponse::Ok().json(serde_json::json!({"rating": user_rating}))
 }

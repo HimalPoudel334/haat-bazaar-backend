@@ -134,6 +134,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    product_ratings (id) {
+        id -> Integer,
+        uuid -> Text,
+        product_id -> Integer,
+        user_id -> Integer,
+        rating -> Double,
+        review -> Nullable<Text>,
+        created_at -> Timestamp,
+        updated_at -> Nullable<Timestamp>,
+    }
+}
+
+diesel::table! {
     products (id) {
         id -> Integer,
         uuid -> Text,
@@ -205,6 +218,8 @@ diesel::joinable!(password_reset_otps -> users (user_id));
 diesel::joinable!(payments -> orders (order_id));
 diesel::joinable!(payments -> users (user_id));
 diesel::joinable!(product_images -> products (product_id));
+diesel::joinable!(product_ratings -> products (product_id));
+diesel::joinable!(product_ratings -> users (user_id));
 diesel::joinable!(products -> categories (category_id));
 diesel::joinable!(refresh_tokens -> users (user_id));
 diesel::joinable!(shipments -> orders (order_id));
@@ -221,6 +236,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     password_reset_otps,
     payments,
     product_images,
+    product_ratings,
     products,
     refresh_tokens,
     shipments,

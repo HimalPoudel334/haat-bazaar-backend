@@ -12,3 +12,4 @@ pub mod product_image;
 pub mod refresh_token;
 pub mod shipment;
 pub mod user;
+pub mod product_rating;
