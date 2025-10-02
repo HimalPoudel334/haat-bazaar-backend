@@ -126,7 +126,7 @@ pub async fn create(
     let product: NewProduct = NewProduct::new(
         form.name.0.to_owned(),
         form.description.0.to_owned(),
-        image_path.unwrap_or_default(), // <- Here is your image path
+        image_path.unwrap_or_default(),
         form.price.0,
         form.previous_price.0,
         form.unit.0.to_owned(),
